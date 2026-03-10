@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Controle de Presença do Ônibus</title>
+  <style>
+    /* Reset e variáveis */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --cor-primaria: #1a56db;
+      --cor-primaria-hover: #1e429f;
+      --cor-sucesso: #057a55;
+      --cor-alerta: #c27803;
+      --cor-perigo: #c81e1e;
+      --cor-fundo: #f3f4f6;
+      --cor-card: #ffffff;
+      --cor-borda: #e5e7eb;
+      --cor-texto: #111827;
+      --cor-texto-suave: #6b7280;
+      --raio: 10px;
+      --sombra: 0 1px 3px rgba(0,0,0,.1);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--cor-fundo);
+      color: var(--cor-texto);
+      min-height: 100vh;
+    }
+
+    /* Cabeçalho */
+    header {
+      background: var(--cor-primaria);
+      color: #fff;
+      padding: 16px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p { font-size: .8rem; opacity: .85; margin-top: 2px; }
+
+    /* Container principal */
+    .container { padding: 12px; max-width: 600px; margin: 0 auto; }
+
+    /* Card base */
+    .card {
+      background: var(--cor-card);
+      border-radius: var(--raio);
+      box-shadow: var(--sombra);
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .card-titulo {
+      padding: 12px 16px;
+      font-size: .95rem;
+      font-weight: 700;
+      border-bottom: 1px solid var(--cor-borda);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Lista de passageiros */
+    .passageiro-item {
+      display: flex;
+      flex-direction: column;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--cor-borda);
+      gap: 6px;
+    }
+    .passageiro-item:last-child { border-bottom: none; }
+
+    .passageiro-nome {
+      font-size: .9rem;
+      font-weight: 600;
+      color: var(--cor-texto);
+    }
+
+    /* Opções de resposta */
+    .opcoes {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .opcao-btn {
+      flex: 1;
+      min-width: 80px;
+      padding: 7px 4px;
+      border: 2px solid var(--cor-borda);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--cor-texto-suave);
+      font-size: .75rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all .15s;
+      user-select: none;
+    }
+    .opcao-btn:active { transform: scale(.96); }
+
+    .opcao-btn.selecionado[data-resposta="vou_e_volto"] {
+      border-color: var(--cor-sucesso);
+      background: #d1fae5;
+      color: var(--cor-sucesso);
+    }
+    .opcao-btn.selecionado[data-resposta="so_vou"] {
+      border-color: var(--cor-primaria);
+      background: #dbeafe;
+      color: var(--cor-primaria);
+    }
+    .opcao-btn.selecionado[data-resposta="so_volto"] {
+      border-color: var(--cor-alerta);
+      background: #fef3c7;
+      color: var(--cor-alerta);
+    }
+
+    /* Resumo */
+    .resumo-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      padding: 14px;
+    }
+    .resumo-item {
+      text-align: center;
+      padding: 10px 6px;
+      border-radius: 8px;
+      background: var(--cor-fundo);
+    }
+    .resumo-numero {
+      font-size: 1.6rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .resumo-label {
+      font-size: .7rem;
+      color: var(--cor-texto-suave);
+      margin-top: 4px;
+    }
+    .resumo-item.total .resumo-numero { color: var(--cor-primaria); }
+    .resumo-item.sentados .resumo-numero { color: var(--cor-sucesso); }
+    .resumo-item.em-pe .resumo-numero { color: var(--cor-perigo); }
+
+    /* Listas de resultado */
+    .lista-resultado { padding: 0 16px 12px; }
+    .lista-resultado ul { list-style: none; }
+    .lista-resultado li {
+      padding: 7px 0;
+      border-bottom: 1px solid var(--cor-borda);
+      font-size: .88rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .lista-resultado li:last-child { border-bottom: none; }
+
+    .badge {
+      font-size: .65rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 99px;
+      white-space: nowrap;
+    }
+    .badge-sentado { background: #d1fae5; color: var(--cor-sucesso); }
+    .badge-em-pe { background: #fee2e2; color: var(--cor-perigo); }
+    .badge-traseiro { background: #fef3c7; color: var(--cor-alerta); }
+
+    .vazio { color: var(--cor-texto-suave); font-size: .85rem; padding: 10px 0; font-style: italic; }
+
+    /* Bancos traseiros */
+    .bancos-lista { padding: 0 16px 12px; }
+    .banco-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--cor-borda);
+      font-size: .88rem;
+    }
+    .banco-item:last-child { border-bottom: none; }
+    .banco-num {
+      width: 26px; height: 26px;
+      background: var(--cor-alerta);
+      color: #fff;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .75rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    /* Admin link */
+    .admin-link {
+      display: block;
+      text-align: center;
+      padding: 12px;
+      color: var(--cor-texto-suave);
+      font-size: .8rem;
+      text-decoration: none;
+      margin-top: 4px;
+    }
+    .admin-link:hover { color: var(--cor-primaria); }
+
+    /* Toast de feedback */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #111;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 99px;
+      font-size: .85rem;
+      transition: transform .25s;
+      z-index: 999;
+      pointer-events: none;
+    }
+    #toast.visivel { transform: translateX(-50%) translateY(0); }
+
+    /* Loading */
+    .loading { text-align: center; padding: 30px; color: var(--cor-texto-suave); font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🚌 Controle de Presença do Ônibus</h1>
+  <p id="data-hoje">Carregando...</p>
+</header>
+
+<div class="container">
+
+  <!-- Lista de passageiros com enquete -->
+  <div class="card" id="card-enquete">
+    <div class="card-titulo">📋 Enquete de Presença</div>
+    <div id="lista-passageiros" class="loading">Carregando passageiros...</div>
+  </div>
+
+  <!-- Resumo do dia -->
+  <div class="card">
+    <div class="card-titulo">📊 Resumo do Dia</div>
+    <div class="resumo-grid">
+      <div class="resumo-item total">
+        <div class="resumo-numero" id="num-total">0</div>
+        <div class="resumo-label">Total</div>
+      </div>
+      <div class="resumo-item sentados">
+        <div class="resumo-numero" id="num-sentados">0</div>
+        <div class="resumo-label">Sentados</div>
+      </div>
+      <div class="resumo-item em-pe">
+        <div class="resumo-numero" id="num-em-pe">0</div>
+        <div class="resumo-label">Em Pé</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pessoas sentadas -->
+  <div class="card">
+    <div class="card-titulo">💺 Pessoas Sentadas</div>
+    <div class="lista-resultado">
+      <ul id="lista-sentados"><li class="vazio">Nenhum passageiro confirmou presença ainda.</li></ul>
+    </div>
+  </div>
+
+  <!-- Pessoas em pé -->
+  <div class="card">
+    <div class="card-titulo">🚶 Pessoas em Pé</div>
+    <div class="lista-resultado">
+      <ul id="lista-em-pe"><li class="vazio">Nenhum.</li></ul>
+    </div>
+  </div>
+
+  <!-- Bancos traseiros -->
+  <div class="card">
+    <div class="card-titulo">🔙 Bancos Traseiros do Dia</div>
+    <div class="bancos-lista" id="lista-bancos">
+      <div class="vazio">Nenhum passageiro confirmado ainda.</div>
+    </div>
+  </div>
+
+  <a href="/admin" class="admin-link">⚙️ Painel Administrativo</a>
+
+</div>
+
+<!-- Toast de feedback -->
+<div id="toast"></div>
+
+<script>
+  // Estado local: mapa de passageiro_id -> resposta atual
+  let respostasLocais = {};
+  let passageiros = [];
+
+  // Formata a data para exibição
+  function formatarData(dataStr) {
+    if (!dataStr) return '';
+    const [ano, mes, dia] = dataStr.split('-');
+    const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    return `${dia} de ${meses[parseInt(mes) - 1]} de ${ano}`;
+  }
+
+  // Exibe mensagem temporária de feedback
+  function mostrarToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('visivel');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => toast.classList.remove('visivel'), 2200);
+  }
+
+  // Carrega a lista de passageiros do servidor
+  async function carregarPassageiros() {
+    const resp = await fetch('/api/passageiros');
+    passageiros = await resp.json();
+  }
+
+  // Carrega respostas do dia e atualiza tudo
+  async function carregarRespostas() {
+    const resp = await fetch('/api/respostas');
+    const dados = await resp.json();
+
+    // Atualiza data no cabeçalho
+    document.getElementById('data-hoje').textContent = formatarData(dados.data);
+
+    // Atualiza mapa de respostas
+    respostasLocais = dados.respostas || {};
+
+    // Atualiza cada linha de passageiro
+    passageiros.forEach(p => {
+      const resposta = respostasLocais[p.id] || null;
+      atualizarBotoesPassageiro(p.id, resposta);
+    });
+
+    // Atualiza resumo
+    document.getElementById('num-total').textContent = dados.resumo.totalPassageiros;
+    document.getElementById('num-sentados').textContent = dados.resumo.totalSentados;
+    document.getElementById('num-em-pe').textContent = dados.resumo.totalEmPe;
+
+    // Atualiza lista de sentados
+    const ulSentados = document.getElementById('lista-sentados');
+    if (dados.sentados.length === 0) {
+      ulSentados.innerHTML = '<li class="vazio">Nenhum passageiro confirmou presença ainda.</li>';
+    } else {
+      ulSentados.innerHTML = dados.sentados.map(p => {
+        const traseiro = dados.bancosTraseiros.some(t => t.id === p.id);
+        const badge = traseiro
+          ? '<span class="badge badge-traseiro">Traseiro</span>'
+          : '<span class="badge badge-sentado">Sentado</span>';
+        return `<li>${badge} ${p.nome}</li>`;
+      }).join('');
+    }
+
+    // Atualiza lista de em pé
+    const ulEmPe = document.getElementById('lista-em-pe');
+    if (dados.emPe.length === 0) {
+      ulEmPe.innerHTML = '<li class="vazio">Nenhum.</li>';
+    } else {
+      ulEmPe.innerHTML = dados.emPe.map(p =>
+        `<li><span class="badge badge-em-pe">Em Pé</span> ${p.nome}</li>`
+      ).join('');
+    }
+
+    // Atualiza bancos traseiros
+    const divBancos = document.getElementById('lista-bancos');
+    if (dados.bancosTraseiros.length === 0) {
+      divBancos.innerHTML = '<div class="vazio">Nenhum passageiro confirmado ainda.</div>';
+    } else {
+      divBancos.innerHTML = dados.bancosTraseiros.map((p, i) =>
+        `<div class="banco-item"><span class="banco-num">${i + 1}</span>${p.nome}</div>`
+      ).join('');
+    }
+  }
+
+  // Atualiza os botões de seleção de um passageiro específico
+  function atualizarBotoesPassageiro(passageiroId, respostaSelecionada) {
+    const item = document.querySelector(`.passageiro-item[data-id="${passageiroId}"]`);
+    if (!item) return;
+    item.querySelectorAll('.opcao-btn').forEach(btn => {
+      if (btn.dataset.resposta === respostaSelecionada) {
+        btn.classList.add('selecionado');
+      } else {
+        btn.classList.remove('selecionado');
+      }
+    });
+  }
+
+  // Envia a resposta de um passageiro ao servidor
+  async function selecionarOpcao(passageiroId, resposta) {
+    const respostaAtual = respostasLocais[passageiroId];
+
+    // Se clicou na mesma opção, remove (toggle)
+    if (respostaAtual === resposta) {
+      await fetch(`/api/respostas/${passageiroId}`, { method: 'DELETE' });
+      delete respostasLocais[passageiroId];
+      atualizarBotoesPassageiro(passageiroId, null);
+      await carregarRespostas();
+      mostrarToast('Resposta removida.');
+      return;
+    }
+
+    // Salva nova resposta
+    const resp = await fetch('/api/respostas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passageiro_id: passageiroId, resposta })
+    });
+
+    if (resp.ok) {
+      respostasLocais[passageiroId] = resposta;
+      atualizarBotoesPassageiro(passageiroId, resposta);
+      await carregarRespostas();
+      const labels = { vou_e_volto: 'Vou e Volto', so_vou: 'Só Vou', so_volto: 'Só Volto' };
+      mostrarToast(`✔ ${labels[resposta]}`);
+    }
+  }
+
+  // Renderiza a lista de passageiros na tela
+  function renderizarPassageiros() {
+    const container = document.getElementById('lista-passageiros');
+    container.innerHTML = passageiros.map(p => `
+      <div class="passageiro-item" data-id="${p.id}">
+        <span class="passageiro-nome">${p.ordem}. ${p.nome}</span>
+        <div class="opcoes">
+          <button class="opcao-btn" data-resposta="vou_e_volto"
+            onclick="selecionarOpcao(${p.id}, 'vou_e_volto')">🔄 Vou e Volto</button>
+          <button class="opcao-btn" data-resposta="so_vou"
+            onclick="selecionarOpcao(${p.id}, 'so_vou')">➡️ Só Vou</button>
+          <button class="opcao-btn" data-resposta="so_volto"
+            onclick="selecionarOpcao(${p.id}, 'so_volto')">⬅️ Só Volto</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Inicialização
+  async function init() {
+    await carregarPassageiros();
+    renderizarPassageiros();
+    await carregarRespostas();
+
+    // Atualiza automaticamente a cada 30 segundos
+    setInterval(carregarRespostas, 30000);
+  }
+
+  init();
+</script>
+</body>
+</html>
