@@ -107,7 +107,7 @@ function initDatabase() {
       'Lara Gaspar da Silva',
       'Letícia Bezerra da Silva',
       'Letycia Gomes Costa',
-      'Matheus Felipe Alves Marinho',
+      'Matheus Filipe Alves Marinho',
       'Nara Samily Gomes de Meneses',
       'Pedro Henrique de Souza Araújo',
       'Pedro Jeferson Oliveira da Silva',

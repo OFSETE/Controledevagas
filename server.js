@@ -63,6 +63,17 @@ function getDataHoje() {
 }
 
 /**
+ * Verifica se ainda é possível votar (antes das 15:30)
+ */
+function podeVotar() {
+  const agora = new Date();
+  const hora = agora.getHours();
+  const minuto = agora.getMinutes();
+  // Bloqueia após 15:30
+  return hora < 15 || (hora === 15 && minuto < 30);
+}
+
+/**
  * Calcula os assentos do dia com base nas respostas e no ponteiro de rodízio.
  * Retorna { sentados, emPe, bancosTranseiros }
  */
@@ -274,6 +285,11 @@ app.get('/api/respostas', (req, res) => {
  * Body: { passageiro_id, resposta }
  */
 app.post('/api/respostas', limiteEscrita, (req, res) => {
+  // Verifica se ainda está no horário permitido para votar
+  if (!podeVotar()) {
+    return res.status(403).json({ erro: 'Votação encerrada. Não é possível votar após 15:30.' });
+  }
+
   const { passageiro_id, resposta } = req.body;
 
   if (!passageiro_id || !resposta) {
@@ -307,6 +323,11 @@ app.post('/api/respostas', limiteEscrita, (req, res) => {
  * Remove a resposta de um passageiro para hoje (desmarca)
  */
 app.delete('/api/respostas/:passageiro_id', limiteEscrita, (req, res) => {
+  // Verifica se ainda está no horário permitido para votar
+  if (!podeVotar()) {
+    return res.status(403).json({ erro: 'Votação encerrada. Não é possível alterar após 15:30.' });
+  }
+
   const { passageiro_id } = req.params;
   const data = getDataHoje();
   db.prepare('DELETE FROM respostas_dia WHERE passageiro_id = ? AND data = ?').run(passageiro_id, data);

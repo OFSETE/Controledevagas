@@ -209,6 +209,25 @@
     }
     .admin-link:hover { color: var(--cor-primaria); }
 
+    /* Botão trocar usuário */
+    .trocar-usuario-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: transparent;
+      border: 2px dashed var(--cor-borda);
+      border-radius: var(--raio);
+      color: var(--cor-texto-suave);
+      font-size: .85rem;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: all .2s;
+    }
+    .trocar-usuario-btn:hover {
+      border-color: var(--cor-perigo);
+      color: var(--cor-perigo);
+    }
+
     /* Toast de feedback */
     #toast {
       position: fixed;
@@ -228,6 +247,84 @@
 
     /* Loading */
     .loading { text-align: center; padding: 30px; color: var(--cor-texto-suave); font-size: .9rem; }
+
+    /* Modal de seleção de usuário */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,.6);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.oculto { display: none; }
+
+    .modal-content {
+      background: var(--cor-card);
+      border-radius: var(--raio);
+      width: 100%;
+      max-width: 400px;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 40px rgba(0,0,0,.3);
+    }
+
+    .modal-header {
+      padding: 20px;
+      text-align: center;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+    .modal-header h2 { font-size: 1.1rem; margin-bottom: 6px; }
+    .modal-header p { font-size: .85rem; color: var(--cor-texto-suave); }
+
+    .modal-search {
+      padding: 16px;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+    .modal-search input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid var(--cor-borda);
+      border-radius: 8px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .modal-search input:focus { border-color: var(--cor-primaria); }
+
+    .modal-lista {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .modal-item {
+      padding: 14px 20px;
+      cursor: pointer;
+      transition: background .15s;
+      font-size: .95rem;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+    .modal-item:last-child { border-bottom: none; }
+    .modal-item:hover { background: var(--cor-fundo); }
+    .modal-item.oculto { display: none; }
+
+    /* Card do usuário logado */
+    .usuario-card {
+      background: linear-gradient(135deg, var(--cor-primaria), #3b82f6);
+      color: #fff;
+      border-radius: var(--raio);
+      padding: 16px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .usuario-card .saudacao { font-size: .85rem; opacity: .9; }
+    .usuario-card .nome { font-size: 1.3rem; font-weight: 700; margin: 6px 0; }
+    .usuario-card .instrucao { font-size: .8rem; opacity: .8; }
   </style>
 </head>
 <body>
@@ -237,12 +334,33 @@
   <p id="data-hoje">Carregando...</p>
 </header>
 
+<!-- Modal de seleção de usuário -->
+<div class="modal-overlay oculto" id="modal-usuario">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>👋 Quem é você?</h2>
+      <p>Selecione seu nome para continuar</p>
+    </div>
+    <div class="modal-search">
+      <input type="text" id="pesquisa-usuario" placeholder="🔍 Pesquisar seu nome..." autocomplete="off">
+    </div>
+    <div class="modal-lista" id="lista-usuarios"></div>
+  </div>
+</div>
+
 <div class="container">
 
-  <!-- Lista de passageiros com enquete -->
-  <div class="card" id="card-enquete">
-    <div class="card-titulo">📋 Enquete de Presença</div>
-    <div id="lista-passageiros" class="loading">Carregando passageiros...</div>
+  <!-- Card do usuário logado -->
+  <div class="usuario-card" id="usuario-card" style="display: none;">
+    <div class="saudacao">Olá,</div>
+    <div class="nome" id="usuario-nome"></div>
+    <div class="instrucao">Selecione sua presença abaixo 👇</div>
+  </div>
+
+  <!-- Votação rápida do usuário -->
+  <div class="card" id="card-minha-votacao" style="display: none;">
+    <div class="card-titulo">🗳️ Minha Presença de Hoje</div>
+    <div id="minha-votacao"></div>
   </div>
 
   <!-- Resumo do dia -->
@@ -288,7 +406,12 @@
     </div>
   </div>
 
-  <a href="/admin" class="admin-link">⚙️ Painel Administrativo</a>
+  <a href="/admin" class="admin-link" id="link-admin" style="display: none;">⚙️ Painel Administrativo</a>
+
+  <!-- Botão para trocar de usuário -->
+  <button class="trocar-usuario-btn" id="btn-trocar-usuario" onclick="trocarUsuario()">
+    🔄 Não sou eu / Trocar usuário
+  </button>
 
 </div>
 
@@ -296,9 +419,13 @@
 <div id="toast"></div>
 
 <script>
-  // Estado local: mapa de passageiro_id -> resposta atual
+  // Estado local
   let respostasLocais = {};
   let passageiros = [];
+  let usuarioAtual = null; // passageiro logado
+
+  // Chave do localStorage
+  const STORAGE_KEY = 'controle_onibus_usuario';
 
   // Formata a data para exibição
   function formatarData(dataStr) {
@@ -315,6 +442,137 @@
     toast.classList.add('visivel');
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => toast.classList.remove('visivel'), 2200);
+  }
+
+  // Carrega usuário salvo no localStorage
+  function carregarUsuarioSalvo() {
+    const salvo = localStorage.getItem(STORAGE_KEY);
+    if (salvo) {
+      try {
+        return JSON.parse(salvo);
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  // Salva usuário no localStorage
+  function salvarUsuario(usuario) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(usuario));
+  }
+
+  // Remove usuário do localStorage
+  function limparUsuario() {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  // Mostra modal de seleção de usuário
+  function mostrarModalUsuario() {
+    const modal = document.getElementById('modal-usuario');
+    const lista = document.getElementById('lista-usuarios');
+    
+    // Renderiza lista de passageiros no modal
+    lista.innerHTML = passageiros.map(p => `
+      <div class="modal-item" data-id="${p.id}" data-nome="${p.nome.toLowerCase()}" onclick="selecionarUsuario(${p.id})">
+        ${p.ordem}. ${p.nome}
+      </div>
+    `).join('');
+    
+    modal.classList.remove('oculto');
+    document.getElementById('pesquisa-usuario').value = '';
+    document.getElementById('pesquisa-usuario').focus();
+  }
+
+  // Oculta modal de seleção
+  function ocultarModalUsuario() {
+    document.getElementById('modal-usuario').classList.add('oculto');
+  }
+
+  // Seleciona um usuário da lista
+  function selecionarUsuario(passageiroId) {
+    const passageiro = passageiros.find(p => p.id === passageiroId);
+    if (!passageiro) return;
+    
+    usuarioAtual = passageiro;
+    salvarUsuario(passageiro);
+    ocultarModalUsuario();
+    atualizarInterfaceUsuario();
+    mostrarToast(`✔ Olá, ${passageiro.nome}!`);
+  }
+
+  // Troca de usuário (clicou em "Não sou eu")
+  function trocarUsuario() {
+    limparUsuario();
+    usuarioAtual = null;
+    mostrarModalUsuario();
+  }
+
+  // Filtro de pesquisa de usuário
+  function filtrarUsuarios(termo) {
+    const itens = document.querySelectorAll('.modal-item');
+    const termoLower = termo.toLowerCase().trim();
+    
+    itens.forEach(item => {
+      const nome = item.dataset.nome;
+      if (termoLower === '' || nome.includes(termoLower)) {
+        item.classList.remove('oculto');
+      } else {
+        item.classList.add('oculto');
+      }
+    });
+  }
+
+  // Atualiza interface com base no usuário logado
+  function atualizarInterfaceUsuario() {
+    const cardUsuario = document.getElementById('usuario-card');
+    const cardMinhaVotacao = document.getElementById('card-minha-votacao');
+    const btnTrocar = document.getElementById('btn-trocar-usuario');
+    const linkAdmin = document.getElementById('link-admin');
+    
+    if (usuarioAtual) {
+      // Mostra card do usuário
+      cardUsuario.style.display = 'block';
+      document.getElementById('usuario-nome').textContent = usuarioAtual.nome;
+      
+      // Mostra card de votação rápida
+      cardMinhaVotacao.style.display = 'block';
+      renderizarMinhaVotacao();
+      
+      btnTrocar.style.display = 'block';
+      
+      // Mostra link admin apenas para Matheus Filipe Alves Marinho
+      if (usuarioAtual.nome === 'Matheus Filipe Alves Marinho') {
+        linkAdmin.style.display = 'block';
+      } else {
+        linkAdmin.style.display = 'none';
+      }
+    } else {
+      cardUsuario.style.display = 'none';
+      cardMinhaVotacao.style.display = 'none';
+      linkAdmin.style.display = 'none';
+    }
+  }
+
+  // Renderiza a votação rápida do usuário logado
+  function renderizarMinhaVotacao() {
+    if (!usuarioAtual) return;
+    
+    const container = document.getElementById('minha-votacao');
+    const p = usuarioAtual;
+    container.innerHTML = `
+      <div class="passageiro-item" data-id="${p.id}" data-minha="true">
+        <span class="passageiro-nome">${p.nome}</span>
+        <div class="opcoes">
+          <button class="opcao-btn" data-resposta="vou_e_volto"
+            onclick="selecionarOpcao(${p.id}, 'vou_e_volto')">🔄 Vou e Volto</button>
+          <button class="opcao-btn" data-resposta="so_vou"
+            onclick="selecionarOpcao(${p.id}, 'so_vou')">➡️ Só Vou</button>
+          <button class="opcao-btn" data-resposta="so_volto"
+            onclick="selecionarOpcao(${p.id}, 'so_volto')">⬅️ Só Volto</button>
+        </div>
+      </div>
+    `;
   }
 
   // Carrega a lista de passageiros do servidor
@@ -334,7 +592,7 @@
     // Atualiza mapa de respostas
     respostasLocais = dados.respostas || {};
 
-    // Atualiza cada linha de passageiro
+    // Atualiza cada linha de passageiro (incluindo a votação rápida)
     passageiros.forEach(p => {
       const resposta = respostasLocais[p.id] || null;
       atualizarBotoesPassageiro(p.id, resposta);
@@ -395,11 +653,26 @@
 
   // Envia a resposta de um passageiro ao servidor
   async function selecionarOpcao(passageiroId, resposta) {
+    // Verifica se o usuário está tentando votar por si mesmo
+    if (!usuarioAtual || usuarioAtual.id !== passageiroId) {
+      mostrarToast('❌ Você só pode votar por si mesmo!');
+      return;
+    }
+
     const respostaAtual = respostasLocais[passageiroId];
 
     // Se clicou na mesma opção, remove (toggle)
     if (respostaAtual === resposta) {
-      await fetch(`/api/respostas/${passageiroId}`, { method: 'DELETE' });
+      const resp = await fetch(`/api/respostas/${passageiroId}`, { 
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario_id: usuarioAtual.id })
+      });
+      if (!resp.ok) {
+        const erro = await resp.json();
+        mostrarToast(`❌ ${erro.erro}`);
+        return;
+      }
       delete respostasLocais[passageiroId];
       atualizarBotoesPassageiro(passageiroId, null);
       await carregarRespostas();
@@ -411,7 +684,7 @@
     const resp = await fetch('/api/respostas', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passageiro_id: passageiroId, resposta })
+      body: JSON.stringify({ passageiro_id: passageiroId, resposta, usuario_id: usuarioAtual.id })
     });
 
     if (resp.ok) {
@@ -420,25 +693,15 @@
       await carregarRespostas();
       const labels = { vou_e_volto: 'Vou e Volto', so_vou: 'Só Vou', so_volto: 'Só Volto' };
       mostrarToast(`✔ ${labels[resposta]}`);
+    } else {
+      const erro = await resp.json();
+      mostrarToast(`❌ ${erro.erro}`);
     }
   }
 
-  // Renderiza a lista de passageiros na tela
+  // Renderiza a lista de passageiros (sem botões de votação)
   function renderizarPassageiros() {
-    const container = document.getElementById('lista-passageiros');
-    container.innerHTML = passageiros.map(p => `
-      <div class="passageiro-item" data-id="${p.id}">
-        <span class="passageiro-nome">${p.ordem}. ${p.nome}</span>
-        <div class="opcoes">
-          <button class="opcao-btn" data-resposta="vou_e_volto"
-            onclick="selecionarOpcao(${p.id}, 'vou_e_volto')">🔄 Vou e Volto</button>
-          <button class="opcao-btn" data-resposta="so_vou"
-            onclick="selecionarOpcao(${p.id}, 'so_vou')">➡️ Só Vou</button>
-          <button class="opcao-btn" data-resposta="so_volto"
-            onclick="selecionarOpcao(${p.id}, 'so_volto')">⬅️ Só Volto</button>
-        </div>
-      </div>
-    `).join('');
+    // Não renderiza mais lista com botões - cada usuário só vota por si
   }
 
   // Inicialização
@@ -446,6 +709,29 @@
     await carregarPassageiros();
     renderizarPassageiros();
     await carregarRespostas();
+
+    // Verifica se há usuário salvo
+    const usuarioSalvo = carregarUsuarioSalvo();
+    if (usuarioSalvo) {
+      // Verifica se o usuário ainda existe na lista
+      const existe = passageiros.find(p => p.id === usuarioSalvo.id);
+      if (existe) {
+        usuarioAtual = existe;
+        atualizarInterfaceUsuario();
+      } else {
+        // Usuário foi removido, limpa e mostra modal
+        limparUsuario();
+        mostrarModalUsuario();
+      }
+    } else {
+      // Primeira vez, mostra modal
+      mostrarModalUsuario();
+    }
+
+    // Listener para pesquisa de usuário
+    document.getElementById('pesquisa-usuario').addEventListener('input', (e) => {
+      filtrarUsuarios(e.target.value);
+    });
 
     // Atualiza automaticamente a cada 30 segundos
     setInterval(carregarRespostas, 30000);

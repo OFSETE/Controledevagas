@@ -169,9 +169,74 @@
 
     .voltar { display: block; text-align: center; padding: 12px; color: var(--cor-texto-suave); font-size: .8rem; text-decoration: none; }
     .voltar:hover { color: var(--cor-primaria); }
+
+    /* Tela de login */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--cor-fundo);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-overlay.oculto { display: none; }
+    .login-box {
+      background: var(--cor-card);
+      border-radius: var(--raio);
+      padding: 30px;
+      text-align: center;
+      box-shadow: 0 4px 20px rgba(0,0,0,.15);
+      max-width: 360px;
+      width: 100%;
+    }
+    .login-box h2 { font-size: 1.3rem; margin-bottom: 8px; }
+    .login-box p { font-size: .85rem; color: var(--cor-texto-suave); margin-bottom: 20px; }
+    .login-box input {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid var(--cor-borda);
+      border-radius: 8px;
+      font-size: 1rem;
+      text-align: center;
+      letter-spacing: 4px;
+      margin-bottom: 16px;
+    }
+    .login-box input:focus { outline: none; border-color: var(--cor-primaria); }
+    .login-box button {
+      width: 100%;
+      padding: 14px 20px;
+      background: var(--cor-primaria);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .login-box button:hover { background: var(--cor-primaria-hover); }
+    .login-erro {
+      color: var(--cor-perigo);
+      font-size: .85rem;
+      margin-top: 12px;
+      display: none;
+    }
+    .login-erro.visivel { display: block; }
   </style>
 </head>
 <body>
+
+<!-- Tela de Login -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box">
+    <h2>🔐 Acesso Restrito</h2>
+    <p>Digite a senha para acessar o painel administrativo</p>
+    <input type="password" id="senha-input" placeholder="Senha" maxlength="10" autocomplete="off">
+    <button onclick="verificarSenha()">Entrar</button>
+    <p class="login-erro" id="login-erro">❌ Senha incorreta</p>
+  </div>
+</div>
 
 <header>
   <h1>⚙️ Painel Administrativo</h1>
@@ -347,6 +412,31 @@
       alert(`❌ Erro: ${dados.erro}`);
     }
   }
+
+  // Verifica a senha de acesso
+  const SENHA_ADMIN = '147258';
+
+  function verificarSenha() {
+    const senha = document.getElementById('senha-input').value;
+    const erroEl = document.getElementById('login-erro');
+    
+    if (senha === SENHA_ADMIN) {
+      document.getElementById('login-overlay').classList.add('oculto');
+      erroEl.classList.remove('visivel');
+    } else {
+      erroEl.classList.add('visivel');
+      document.getElementById('senha-input').value = '';
+      document.getElementById('senha-input').focus();
+    }
+  }
+
+  // Permite pressionar Enter para enviar
+  document.getElementById('senha-input').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') verificarSenha();
+  });
+
+  // Sempre pede senha ao acessar
+  document.getElementById('senha-input').focus();
 
   // Inicialização
   carregarRelatorios();
