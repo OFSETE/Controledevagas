@@ -1,0 +1,16 @@
+# render.yaml
+# Configuração para deploy no Render.com
+
+services:
+  - type: web
+    name: controle-onibus
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server-turso.js
+    envVars:
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: NODE_ENV
+        value: production

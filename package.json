@@ -1,10 +1,11 @@
 {
   "name": "controledevagas",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sistema de Controle de Presença do Ônibus",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start:cloud": "node server-turso.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -20,6 +21,7 @@
   },
   "homepage": "https://github.com/OFSETE/Controledevagas#readme",
   "dependencies": {
+    "@libsql/client": "^0.14.0",
     "better-sqlite3": "^12.6.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.3.1",
