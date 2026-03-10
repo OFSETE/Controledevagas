@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Painel Admin — Controle do Ônibus</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --cor-primaria: #1a56db;
+      --cor-primaria-hover: #1e429f;
+      --cor-sucesso: #057a55;
+      --cor-alerta: #c27803;
+      --cor-perigo: #c81e1e;
+      --cor-fundo: #f3f4f6;
+      --cor-card: #ffffff;
+      --cor-borda: #e5e7eb;
+      --cor-texto: #111827;
+      --cor-texto-suave: #6b7280;
+      --raio: 10px;
+      --sombra: 0 1px 3px rgba(0,0,0,.1);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--cor-fundo);
+      color: var(--cor-texto);
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--cor-primaria);
+      color: #fff;
+      padding: 16px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p { font-size: .8rem; opacity: .85; margin-top: 2px; }
+
+    .container { padding: 12px; max-width: 900px; margin: 0 auto; }
+
+    .card {
+      background: var(--cor-card);
+      border-radius: var(--raio);
+      box-shadow: var(--sombra);
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .card-titulo {
+      padding: 12px 16px;
+      font-size: .95rem;
+      font-weight: 700;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+
+    /* Botão de ação */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: none;
+      font-size: .78rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity .15s;
+    }
+    .btn:active { opacity: .7; }
+    .btn-primario { background: var(--cor-primaria); color: #fff; }
+    .btn-sucesso { background: var(--cor-sucesso); color: #fff; }
+    .btn-alerta { background: var(--cor-alerta); color: #fff; }
+    .btn-perigo { background: var(--cor-perigo); color: #fff; }
+
+    /* Barra de ações */
+    .acoes-topo {
+      padding: 12px 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+
+    /* Tabela responsiva */
+    .tabela-wrapper { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .85rem;
+    }
+    thead tr { background: var(--cor-fundo); }
+    th {
+      padding: 10px 12px;
+      text-align: left;
+      font-size: .75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--cor-texto-suave);
+      border-bottom: 2px solid var(--cor-borda);
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--cor-borda);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f9fafb; }
+
+    .acoes-linha { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    /* Modal de relatório */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 200;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .modal-overlay.aberto { display: flex; }
+    .modal {
+      background: #fff;
+      border-radius: var(--raio);
+      width: 100%;
+      max-width: 560px;
+      padding: 20px;
+      position: relative;
+    }
+    .modal-fechar {
+      position: absolute;
+      top: 14px; right: 16px;
+      font-size: 1.3rem;
+      cursor: pointer;
+      color: var(--cor-texto-suave);
+      background: none;
+      border: none;
+      line-height: 1;
+    }
+    .modal h2 { font-size: 1.1rem; margin-bottom: 14px; }
+    .modal-secao { margin-bottom: 14px; }
+    .modal-secao h3 { font-size: .9rem; font-weight: 700; margin-bottom: 6px; color: var(--cor-texto-suave); }
+    .modal-secao ul { list-style: none; font-size: .85rem; }
+    .modal-secao li { padding: 4px 0; border-bottom: 1px solid var(--cor-borda); }
+    .modal-secao li:last-child { border-bottom: none; }
+    .modal-resumo { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .modal-stat {
+      background: var(--cor-fundo);
+      border-radius: 8px;
+      padding: 8px 14px;
+      text-align: center;
+      flex: 1;
+      min-width: 80px;
+    }
+    .modal-stat .num { font-size: 1.3rem; font-weight: 800; color: var(--cor-primaria); }
+    .modal-stat .label { font-size: .7rem; color: var(--cor-texto-suave); margin-top: 2px; }
+
+    .vazio { color: var(--cor-texto-suave); font-size: .85rem; font-style: italic; }
+    .loading { padding: 30px; text-align: center; color: var(--cor-texto-suave); font-size: .9rem; }
+
+    .voltar { display: block; text-align: center; padding: 12px; color: var(--cor-texto-suave); font-size: .8rem; text-decoration: none; }
+    .voltar:hover { color: var(--cor-primaria); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚙️ Painel Administrativo</h1>
+  <p>Histórico de Relatórios — Últimos 15 dias</p>
+</header>
+
+<div class="container">
+
+  <div class="card">
+    <div class="card-titulo">📁 Relatórios Salvos</div>
+    <div class="acoes-topo">
+      <button class="btn btn-primario" onclick="gerarRelatorioHoje()">⚡ Gerar Relatório de Hoje</button>
+      <button class="btn btn-sucesso" onclick="carregarRelatorios()">🔄 Atualizar</button>
+    </div>
+    <div id="tabela-container" class="loading">Carregando relatórios...</div>
+  </div>
+
+  <a href="/" class="voltar">← Voltar para o Controle de Presença</a>
+
+</div>
+
+<!-- Modal de detalhe do relatório -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <button class="modal-fechar" onclick="fecharModal()">✕</button>
+    <h2 id="modal-titulo">Relatório</h2>
+    <div id="modal-conteudo" class="loading">Carregando...</div>
+  </div>
+</div>
+
+<script>
+  // Formata a data para exibição amigável
+  function formatarData(dataStr) {
+    if (!dataStr) return '';
+    const [ano, mes, dia] = dataStr.split('-');
+    const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    return `${parseInt(dia)} de ${meses[parseInt(mes) - 1]} de ${ano}`;
+  }
+
+  // Carrega e renderiza a tabela de relatórios
+  async function carregarRelatorios() {
+    const container = document.getElementById('tabela-container');
+    container.innerHTML = '<div class="loading">Carregando...</div>';
+
+    const resp = await fetch('/api/relatorios');
+    const relatorios = await resp.json();
+
+    if (relatorios.length === 0) {
+      container.innerHTML = '<div class="loading">Nenhum relatório encontrado.</div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <div class="tabela-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Total</th>
+              <th>V+V</th>
+              <th>Só Vou</th>
+              <th>Só Volta</th>
+              <th>Sentados</th>
+              <th>Em Pé</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${relatorios.map(r => `
+              <tr>
+                <td><strong>${formatarData(r.data)}</strong></td>
+                <td>${r.total_passageiros}</td>
+                <td>${r.total_vou_e_volto}</td>
+                <td>${r.total_so_vou}</td>
+                <td>${r.total_so_volto}</td>
+                <td>${r.total_sentados}</td>
+                <td>${r.total_em_pe}</td>
+                <td>
+                  <div class="acoes-linha">
+                    <button class="btn btn-primario" onclick="verRelatorio('${r.data}')">👁 Ver</button>
+                    <a class="btn btn-sucesso" href="/api/relatorios/${r.data}/csv">📄 CSV</a>
+                    <a class="btn btn-alerta" href="/api/relatorios/${r.data}/pdf">📑 PDF</a>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  // Abre o modal com o detalhe de um relatório
+  async function verRelatorio(data) {
+    document.getElementById('modal-titulo').textContent = `Relatório — ${formatarData(data)}`;
+    document.getElementById('modal-conteudo').innerHTML = '<div class="loading">Carregando...</div>';
+    document.getElementById('modal-overlay').classList.add('aberto');
+
+    const resp = await fetch(`/api/relatorios/${data}`);
+    if (!resp.ok) {
+      document.getElementById('modal-conteudo').innerHTML = '<p class="vazio">Erro ao carregar relatório.</p>';
+      return;
+    }
+
+    const r = await resp.json();
+    const d = r.dados;
+
+    const labelResposta = { vou_e_volto: 'Vou e Volto', so_vou: 'Só Vou', so_volto: 'Só Volto' };
+
+    document.getElementById('modal-conteudo').innerHTML = `
+      <div class="modal-resumo">
+        <div class="modal-stat"><div class="num">${r.total_passageiros}</div><div class="label">Total</div></div>
+        <div class="modal-stat"><div class="num">${r.total_vou_e_volto}</div><div class="label">V+V</div></div>
+        <div class="modal-stat"><div class="num">${r.total_so_vou}</div><div class="label">Só Vou</div></div>
+        <div class="modal-stat"><div class="num">${r.total_so_volto}</div><div class="label">Só Volta</div></div>
+        <div class="modal-stat"><div class="num">${r.total_sentados}</div><div class="label">Sentados</div></div>
+        <div class="modal-stat"><div class="num">${r.total_em_pe}</div><div class="label">Em Pé</div></div>
+      </div>
+
+      <div class="modal-secao">
+        <h3>💺 Passageiros Sentados (${d.sentados.length})</h3>
+        ${d.sentados.length === 0
+          ? '<p class="vazio">Nenhum</p>'
+          : `<ul>${d.sentados.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+      </div>
+
+      <div class="modal-secao">
+        <h3>🚶 Passageiros em Pé (${d.emPe.length})</h3>
+        ${d.emPe.length === 0
+          ? '<p class="vazio">Nenhum</p>'
+          : `<ul>${d.emPe.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+      </div>
+
+      <div class="modal-secao">
+        <h3>🔙 Bancos Traseiros (${d.bancosTraseiros.length})</h3>
+        ${d.bancosTraseiros.length === 0
+          ? '<p class="vazio">Nenhum</p>'
+          : `<ul>${d.bancosTraseiros.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+      </div>
+
+      <div class="modal-secao">
+        <h3>📋 Todos os Passageiros do Dia (${d.passageiros.length})</h3>
+        <ul>${d.passageiros.map((p, i) =>
+          `<li>${i+1}. ${p.nome} — ${labelResposta[p.resposta] || p.resposta}</li>`
+        ).join('')}</ul>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <a class="btn btn-sucesso" href="/api/relatorios/${data}/csv">📄 Baixar CSV</a>
+        <a class="btn btn-alerta" href="/api/relatorios/${data}/pdf">📑 Baixar PDF</a>
+      </div>
+    `;
+  }
+
+  // Fecha o modal
+  function fecharModal() {
+    document.getElementById('modal-overlay').classList.remove('aberto');
+  }
+
+  // Fecha o modal ao clicar fora dele
+  document.getElementById('modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) fecharModal();
+  });
+
+  // Gera relatório do dia atual
+  async function gerarRelatorioHoje() {
+    const resp = await fetch('/api/relatorios/gerar', { method: 'POST' });
+    const dados = await resp.json();
+    if (resp.ok) {
+      alert(`✅ Relatório gerado!\nPassageiros: ${dados.totalPassageiros}\nSentados: ${dados.sentados.length}\nEm pé: ${dados.emPe.length}`);
+      carregarRelatorios();
+    } else {
+      alert(`❌ Erro: ${dados.erro}`);
+    }
+  }
+
+  // Inicialização
+  carregarRelatorios();
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "controledevagas",
+  "version": "1.0.0",
+  "description": "Sistema de Controle de Presença do Ônibus",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OFSETE/Controledevagas.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/OFSETE/Controledevagas/issues"
+  },
+  "homepage": "https://github.com/OFSETE/Controledevagas#readme",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.1",
+    "node-cron": "^4.2.1",
+    "pdfkit": "^0.17.2"
+  }
+}
