@@ -64,26 +64,30 @@ function initDatabase() {
     )
   `);
 
-  // Tabela de controle do ponteiro de rodízio dos assentos
+  // Tabela de controle do ponteiro de rodízio dos assentos (em pé)
+  // id=1 = IDA, id=2 = VOLTA
   db.exec(`
     CREATE TABLE IF NOT EXISTS rotacao_assentos (
-      id INTEGER PRIMARY KEY CHECK(id = 1),
+      id INTEGER PRIMARY KEY CHECK(id IN (1, 2)),
       ponteiro INTEGER NOT NULL DEFAULT 0
     )
   `);
 
   // Tabela de controle do ponteiro de rodízio dos bancos traseiros
+  // id=1 = IDA, id=2 = VOLTA
   db.exec(`
     CREATE TABLE IF NOT EXISTS rotacao_bancos_traseiros (
-      id INTEGER PRIMARY KEY CHECK(id = 1),
+      id INTEGER PRIMARY KEY CHECK(id IN (1, 2)),
       ponteiro INTEGER NOT NULL DEFAULT 0
     )
   `);
 
-  // Inicializa ponteiros se não existirem
+  // Inicializa ponteiros se não existirem (ida=1, volta=2)
   db.exec(`
     INSERT OR IGNORE INTO rotacao_assentos (id, ponteiro) VALUES (1, 0);
+    INSERT OR IGNORE INTO rotacao_assentos (id, ponteiro) VALUES (2, 0);
     INSERT OR IGNORE INTO rotacao_bancos_traseiros (id, ponteiro) VALUES (1, 0);
+    INSERT OR IGNORE INTO rotacao_bancos_traseiros (id, ponteiro) VALUES (2, 0);
   `);
 
   // Popula a lista de passageiros se ainda não existir

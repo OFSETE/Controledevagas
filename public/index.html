@@ -400,37 +400,71 @@
         <div class="resumo-label">Total</div>
       </div>
       <div class="resumo-item sentados">
-        <div class="resumo-numero" id="num-sentados">0</div>
-        <div class="resumo-label">Sentados</div>
+        <div class="resumo-numero" id="num-ida">0</div>
+        <div class="resumo-label">Ida</div>
       </div>
       <div class="resumo-item em-pe">
-        <div class="resumo-numero" id="num-em-pe">0</div>
-        <div class="resumo-label">Em Pé</div>
+        <div class="resumo-numero" id="num-volta">0</div>
+        <div class="resumo-label">Volta</div>
       </div>
     </div>
   </div>
 
-  <!-- Pessoas sentadas -->
-  <div class="card">
-    <div class="card-titulo">💺 Pessoas Sentadas</div>
-    <div class="lista-resultado">
-      <ul id="lista-sentados"><li class="vazio">Nenhum passageiro confirmou presença ainda.</li></ul>
+  <!-- ========== SEÇÃO IDA ========== -->
+  <div class="card" style="border-left: 4px solid #1a56db;">
+    <div class="card-titulo" style="background: linear-gradient(90deg, #dbeafe, transparent);">➡️ IDA</div>
+    
+    <!-- Pessoas sentadas IDA -->
+    <div style="padding: 12px 16px; border-bottom: 1px solid var(--cor-borda);">
+      <strong style="color: var(--cor-sucesso);">💺 Sentados (<span id="num-sentados-ida">0</span>)</strong>
+      <div class="lista-resultado">
+        <ul id="lista-sentados-ida"><li class="vazio">Nenhum passageiro confirmou presença ainda.</li></ul>
+      </div>
+    </div>
+    
+    <!-- Pessoas em pé IDA -->
+    <div style="padding: 12px 16px; border-bottom: 1px solid var(--cor-borda);">
+      <strong style="color: var(--cor-perigo);">🚶 Em Pé (<span id="num-em-pe-ida">0</span>)</strong>
+      <div class="lista-resultado">
+        <ul id="lista-em-pe-ida"><li class="vazio">Nenhum.</li></ul>
+      </div>
+    </div>
+    
+    <!-- Bancos traseiros IDA -->
+    <div id="card-bancos-traseiros-ida" style="display: none; padding: 12px 16px;">
+      <strong style="color: var(--cor-alerta);">🔙 Bancos Traseiros (<span id="num-bancos-ida">0</span>)</strong>
+      <div class="bancos-lista" id="lista-bancos-ida">
+        <div class="vazio">Nenhum.</div>
+      </div>
     </div>
   </div>
 
-  <!-- Pessoas em pé -->
-  <div class="card">
-    <div class="card-titulo">🚶 Pessoas em Pé</div>
-    <div class="lista-resultado">
-      <ul id="lista-em-pe"><li class="vazio">Nenhum.</li></ul>
+  <!-- ========== SEÇÃO VOLTA ========== -->
+  <div class="card" style="border-left: 4px solid #057a55;">
+    <div class="card-titulo" style="background: linear-gradient(90deg, #d1fae5, transparent);">⬅️ VOLTA</div>
+    
+    <!-- Pessoas sentadas VOLTA -->
+    <div style="padding: 12px 16px; border-bottom: 1px solid var(--cor-borda);">
+      <strong style="color: var(--cor-sucesso);">💺 Sentados (<span id="num-sentados-volta">0</span>)</strong>
+      <div class="lista-resultado">
+        <ul id="lista-sentados-volta"><li class="vazio">Nenhum passageiro confirmou presença ainda.</li></ul>
+      </div>
     </div>
-  </div>
-
-  <!-- Bancos traseiros (só aparece quando > 18 passageiros) -->
-  <div class="card" id="card-bancos-traseiros" style="display: none;">
-    <div class="card-titulo">🔙 Bancos Traseiros do Dia</div>
-    <div class="bancos-lista" id="lista-bancos">
-      <div class="vazio">Nenhum passageiro confirmado ainda.</div>
+    
+    <!-- Pessoas em pé VOLTA -->
+    <div style="padding: 12px 16px; border-bottom: 1px solid var(--cor-borda);">
+      <strong style="color: var(--cor-perigo);">🚶 Em Pé (<span id="num-em-pe-volta">0</span>)</strong>
+      <div class="lista-resultado">
+        <ul id="lista-em-pe-volta"><li class="vazio">Nenhum.</li></ul>
+      </div>
+    </div>
+    
+    <!-- Bancos traseiros VOLTA -->
+    <div id="card-bancos-traseiros-volta" style="display: none; padding: 12px 16px;">
+      <strong style="color: var(--cor-alerta);">🔙 Bancos Traseiros (<span id="num-bancos-volta">0</span>)</strong>
+      <div class="bancos-lista" id="lista-bancos-volta">
+        <div class="vazio">Nenhum.</div>
+      </div>
     </div>
   </div>
 
@@ -628,16 +662,18 @@
 
     // Atualiza resumo
     document.getElementById('num-total').textContent = dados.resumo.totalPassageiros;
-    document.getElementById('num-sentados').textContent = dados.resumo.totalSentados;
-    document.getElementById('num-em-pe').textContent = dados.resumo.totalEmPe;
+    document.getElementById('num-ida').textContent = dados.resumo.totalPresentesIda || 0;
+    document.getElementById('num-volta').textContent = dados.resumo.totalPresentesVolta || 0;
 
-    // Atualiza lista de sentados
-    const ulSentados = document.getElementById('lista-sentados');
-    if (dados.sentados.length === 0) {
-      ulSentados.innerHTML = '<li class="vazio">Nenhum passageiro confirmou presença ainda.</li>';
+    // ========== IDA ==========
+    // Sentados IDA
+    document.getElementById('num-sentados-ida').textContent = dados.ida.sentados.length;
+    const ulSentadosIda = document.getElementById('lista-sentados-ida');
+    if (dados.ida.sentados.length === 0) {
+      ulSentadosIda.innerHTML = '<li class="vazio">Nenhum passageiro confirmou presença ainda.</li>';
     } else {
-      ulSentados.innerHTML = dados.sentados.map(p => {
-        const traseiro = dados.bancosTraseiros.some(t => t.id === p.id);
+      ulSentadosIda.innerHTML = dados.ida.sentados.map(p => {
+        const traseiro = dados.ida.bancosTraseiros.some(t => t.id === p.id);
         const badge = traseiro
           ? '<span class="badge badge-traseiro">Traseiro</span>'
           : '<span class="badge badge-sentado">Sentado</span>';
@@ -645,27 +681,70 @@
       }).join('');
     }
 
-    // Atualiza lista de em pé
-    const ulEmPe = document.getElementById('lista-em-pe');
-    if (dados.emPe.length === 0) {
-      ulEmPe.innerHTML = '<li class="vazio">Nenhum.</li>';
+    // Em Pé IDA
+    document.getElementById('num-em-pe-ida').textContent = dados.ida.emPe.length;
+    const ulEmPeIda = document.getElementById('lista-em-pe-ida');
+    if (dados.ida.emPe.length === 0) {
+      ulEmPeIda.innerHTML = '<li class="vazio">Nenhum.</li>';
     } else {
-      ulEmPe.innerHTML = dados.emPe.map(p =>
+      ulEmPeIda.innerHTML = dados.ida.emPe.map(p =>
         `<li><span class="badge badge-em-pe">Em Pé</span> ${p.nome}</li>`
       ).join('');
     }
 
-    // Atualiza bancos traseiros (só mostra se > 18 passageiros)
-    const cardBancos = document.getElementById('card-bancos-traseiros');
-    const divBancos = document.getElementById('lista-bancos');
+    // Bancos Traseiros IDA
+    const cardBancosIda = document.getElementById('card-bancos-traseiros-ida');
+    const divBancosIda = document.getElementById('lista-bancos-ida');
+    document.getElementById('num-bancos-ida').textContent = dados.ida.bancosTraseiros.length;
     
-    if (dados.resumo.totalPassageiros > 18 && dados.bancosTraseiros.length > 0) {
-      cardBancos.style.display = 'block';
-      divBancos.innerHTML = dados.bancosTraseiros.map((p, i) =>
+    if (dados.resumo.totalPresentesIda > 18 && dados.ida.bancosTraseiros.length > 0) {
+      cardBancosIda.style.display = 'block';
+      divBancosIda.innerHTML = dados.ida.bancosTraseiros.map((p, i) =>
         `<div class="banco-item"><span class="banco-num">${i + 1}</span>${p.nome}</div>`
       ).join('');
     } else {
-      cardBancos.style.display = 'none';
+      cardBancosIda.style.display = 'none';
+    }
+
+    // ========== VOLTA ==========
+    // Sentados VOLTA
+    document.getElementById('num-sentados-volta').textContent = dados.volta.sentados.length;
+    const ulSentadosVolta = document.getElementById('lista-sentados-volta');
+    if (dados.volta.sentados.length === 0) {
+      ulSentadosVolta.innerHTML = '<li class="vazio">Nenhum passageiro confirmou presença ainda.</li>';
+    } else {
+      ulSentadosVolta.innerHTML = dados.volta.sentados.map(p => {
+        const traseiro = dados.volta.bancosTraseiros.some(t => t.id === p.id);
+        const badge = traseiro
+          ? '<span class="badge badge-traseiro">Traseiro</span>'
+          : '<span class="badge badge-sentado">Sentado</span>';
+        return `<li>${badge} ${p.nome}</li>`;
+      }).join('');
+    }
+
+    // Em Pé VOLTA
+    document.getElementById('num-em-pe-volta').textContent = dados.volta.emPe.length;
+    const ulEmPeVolta = document.getElementById('lista-em-pe-volta');
+    if (dados.volta.emPe.length === 0) {
+      ulEmPeVolta.innerHTML = '<li class="vazio">Nenhum.</li>';
+    } else {
+      ulEmPeVolta.innerHTML = dados.volta.emPe.map(p =>
+        `<li><span class="badge badge-em-pe">Em Pé</span> ${p.nome}</li>`
+      ).join('');
+    }
+
+    // Bancos Traseiros VOLTA
+    const cardBancosVolta = document.getElementById('card-bancos-traseiros-volta');
+    const divBancosVolta = document.getElementById('lista-bancos-volta');
+    document.getElementById('num-bancos-volta').textContent = dados.volta.bancosTraseiros.length;
+    
+    if (dados.resumo.totalPresentesVolta > 18 && dados.volta.bancosTraseiros.length > 0) {
+      cardBancosVolta.style.display = 'block';
+      divBancosVolta.innerHTML = dados.volta.bancosTraseiros.map((p, i) =>
+        `<div class="banco-item"><span class="banco-num">${i + 1}</span>${p.nome}</div>`
+      ).join('');
+    } else {
+      cardBancosVolta.style.display = 'none';
     }
 
     // Controla exibição baseado em podeVotar

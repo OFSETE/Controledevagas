@@ -550,36 +550,95 @@
 
     const labelResposta = { vou_e_volto: 'Vou e Volto', so_vou: 'Só Vou', so_volto: 'Só Volto' };
 
+    // Verifica se é formato novo (com ida/volta) ou antigo
+    let conteudoIdaVolta = '';
+    if (d.ida && d.volta) {
+      conteudoIdaVolta = `
+        <div style="background: #dbeafe; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+          <h3 style="color: #1a56db; margin-bottom: 8px;">➡️ IDA (${d.ida.totalPresentes || d.ida.sentados.length} pessoas)</h3>
+          
+          <div class="modal-secao">
+            <strong style="color: #057a55;">💺 Sentados (${d.ida.sentados.length})</strong>
+            ${d.ida.sentados.length === 0
+              ? '<p class="vazio">Nenhum</p>'
+              : `<ul>${d.ida.sentados.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+          </div>
+
+          <div class="modal-secao">
+            <strong style="color: #c81e1e;">🚶 Em Pé (${d.ida.emPe.length})</strong>
+            ${d.ida.emPe.length === 0
+              ? '<p class="vazio">Nenhum</p>'
+              : `<ul>${d.ida.emPe.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+          </div>
+
+          ${d.ida.bancosTraseiros && d.ida.bancosTraseiros.length > 0 ? `
+            <div class="modal-secao">
+              <strong style="color: #c27803;">🔙 Bancos Traseiros (${d.ida.bancosTraseiros.length})</strong>
+              <ul>${d.ida.bancosTraseiros.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>
+            </div>
+          ` : ''}
+        </div>
+
+        <div style="background: #d1fae5; padding: 12px; border-radius: 8px; margin-bottom: 12px;">
+          <h3 style="color: #057a55; margin-bottom: 8px;">⬅️ VOLTA (${d.volta.totalPresentes || d.volta.sentados.length} pessoas)</h3>
+          
+          <div class="modal-secao">
+            <strong style="color: #057a55;">💺 Sentados (${d.volta.sentados.length})</strong>
+            ${d.volta.sentados.length === 0
+              ? '<p class="vazio">Nenhum</p>'
+              : `<ul>${d.volta.sentados.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+          </div>
+
+          <div class="modal-secao">
+            <strong style="color: #c81e1e;">🚶 Em Pé (${d.volta.emPe.length})</strong>
+            ${d.volta.emPe.length === 0
+              ? '<p class="vazio">Nenhum</p>'
+              : `<ul>${d.volta.emPe.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+          </div>
+
+          ${d.volta.bancosTraseiros && d.volta.bancosTraseiros.length > 0 ? `
+            <div class="modal-secao">
+              <strong style="color: #c27803;">🔙 Bancos Traseiros (${d.volta.bancosTraseiros.length})</strong>
+              <ul>${d.volta.bancosTraseiros.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    } else {
+      // Formato antigo para compatibilidade
+      conteudoIdaVolta = `
+        <div class="modal-secao">
+          <h3>💺 Passageiros Sentados (${d.sentados ? d.sentados.length : 0})</h3>
+          ${!d.sentados || d.sentados.length === 0
+            ? '<p class="vazio">Nenhum</p>'
+            : `<ul>${d.sentados.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+        </div>
+
+        <div class="modal-secao">
+          <h3>🚶 Passageiros em Pé (${d.emPe ? d.emPe.length : 0})</h3>
+          ${!d.emPe || d.emPe.length === 0
+            ? '<p class="vazio">Nenhum</p>'
+            : `<ul>${d.emPe.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+        </div>
+
+        <div class="modal-secao">
+          <h3>🔙 Bancos Traseiros (${d.bancosTraseiros ? d.bancosTraseiros.length : 0})</h3>
+          ${!d.bancosTraseiros || d.bancosTraseiros.length === 0
+            ? '<p class="vazio">Nenhum</p>'
+            : `<ul>${d.bancosTraseiros.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
+        </div>
+      `;
+    }
+
     document.getElementById('modal-conteudo').innerHTML = `
       <div class="modal-resumo">
         <div class="modal-stat"><div class="num">${r.total_passageiros}</div><div class="label">Total</div></div>
         <div class="modal-stat"><div class="num">${r.total_vou_e_volto}</div><div class="label">V+V</div></div>
         <div class="modal-stat"><div class="num">${r.total_so_vou}</div><div class="label">Só Vou</div></div>
         <div class="modal-stat"><div class="num">${r.total_so_volto}</div><div class="label">Só Volta</div></div>
-        <div class="modal-stat"><div class="num">${r.total_sentados}</div><div class="label">Sentados</div></div>
-        <div class="modal-stat"><div class="num">${r.total_em_pe}</div><div class="label">Em Pé</div></div>
       </div>
 
-      <div class="modal-secao">
-        <h3>💺 Passageiros Sentados (${d.sentados.length})</h3>
-        ${d.sentados.length === 0
-          ? '<p class="vazio">Nenhum</p>'
-          : `<ul>${d.sentados.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
-      </div>
-
-      <div class="modal-secao">
-        <h3>🚶 Passageiros em Pé (${d.emPe.length})</h3>
-        ${d.emPe.length === 0
-          ? '<p class="vazio">Nenhum</p>'
-          : `<ul>${d.emPe.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
-      </div>
-
-      <div class="modal-secao">
-        <h3>🔙 Bancos Traseiros (${d.bancosTraseiros.length})</h3>
-        ${d.bancosTraseiros.length === 0
-          ? '<p class="vazio">Nenhum</p>'
-          : `<ul>${d.bancosTraseiros.map((p, i) => `<li>${i+1}. ${p.nome}</li>`).join('')}</ul>`}
-      </div>
+      ${conteudoIdaVolta}
 
       <div class="modal-secao">
         <h3>📋 Todos os Passageiros do Dia (${d.passageiros.length})</h3>
@@ -610,7 +669,9 @@
     const resp = await fetch('/api/relatorios/gerar', { method: 'POST' });
     const dados = await resp.json();
     if (resp.ok) {
-      alert(`✅ Relatório gerado!\nPassageiros: ${dados.totalPassageiros}\nSentados: ${dados.sentados.length}\nEm pé: ${dados.emPe.length}`);
+      const totalSentados = dados.ida.sentados.length + dados.volta.sentados.length;
+      const totalEmPe = dados.ida.emPe.length + dados.volta.emPe.length;
+      alert(`✅ Relatório gerado!\nPassageiros: ${dados.totalPassageiros}\nSentados (ida+volta): ${totalSentados}\nEm pé (ida+volta): ${totalEmPe}`);
       carregarRelatorios();
     } else {
       alert(`❌ Erro: ${dados.erro}`);

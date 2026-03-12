@@ -83,8 +83,11 @@ function podeVotar() {
  * 
  * Rodízio Em Pé: A-Z (Ana primeiro, depois Antônia, etc.)
  * Rodízio Bancos Traseiros: Z-A (Vitória primeiro, depois Raimundo, etc.)
+ * 
+ * @param {Array} presentes - Lista de passageiros presentes
+ * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function calcularAssentosDoDia(presentes) {
+function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   if (presentes.length === 0) {
     return { sentados: [], emPe: [], bancosTraseiros: [], cadeirasFixas: [] };
   }
@@ -104,15 +107,15 @@ function calcularAssentosDoDia(presentes) {
     
     // Bancos traseiros só se > 18 pessoas (excluindo cadeiras fixas do rodízio)
     if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
-      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
+      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
       bancosTraseiros = calcularBancosTraseiros(participantesRodizio, ponteiroBancos, totalPresentes);
     }
     return { sentados, emPe: [], bancosTraseiros, cadeirasFixas };
   }
 
-  // Busca ponteiros de rodízio
-  const ponteiroEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get().ponteiro;
-  const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
+  // Busca ponteiros de rodízio (usando tipoRodizio: 1=ida, 2=volta)
+  const ponteiroEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
 
   // Ordena participantes A-Z para rodízio de em pé
   const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
@@ -142,11 +145,168 @@ function calcularAssentosDoDia(presentes) {
 }
 
 /**
+ * Calcula assentos completo para IDA e VOLTA separadamente.
+ * 
+ * REGRA IMPORTANTE: 
+ * - Usa o MESMO ponteiro para ida e volta (tanto em pé quanto bancos traseiros)
+ * - A volta continua de onde a ida parou
+ * - Quem ficou em pé na IDA é pulado na VOLTA
+ * - Quem foi para banco traseiro na IDA é pulado na VOLTA
+ * 
+ * @param {Array} respostasComCadeiraFixa - Lista de respostas com informação de cadeira_fixa
+ * @returns {Object} { ida: {...}, volta: {...} }
+ */
+function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
+  // Filtra quem vai na IDA: vou_e_volto ou so_vou
+  const presentesIda = respostasComCadeiraFixa.filter(r => 
+    r.resposta === 'vou_e_volto' || r.resposta === 'so_vou'
+  );
+  
+  // Filtra quem vai na VOLTA: vou_e_volto ou so_volto
+  const presentesVolta = respostasComCadeiraFixa.filter(r => 
+    r.resposta === 'vou_e_volto' || r.resposta === 'so_volto'
+  );
+
+  // ========== CÁLCULO DA IDA ==========
+  const resultadoIda = calcularAssentosTrechoComPonteiro(
+    presentesIda, 
+    1, 
+    [], // Sem exclusões de em pé
+    0,  // Sem offset de em pé
+    [], // Sem exclusões de bancos traseiros
+    0   // Sem offset de bancos traseiros
+  );
+
+  // ========== CÁLCULO DA VOLTA ==========
+  // Quem ficou em pé na IDA deve ser pulado na VOLTA
+  // Quem foi para banco traseiro na IDA deve ser pulado na VOLTA
+  // Continua do ponteiro onde a ida parou
+  const resultadoVolta = calcularAssentosTrechoComPonteiro(
+    presentesVolta, 
+    1, // Usa o MESMO ponteiro (ida)
+    resultadoIda.emPe, // Pula quem já ficou em pé na ida
+    resultadoIda.emPe.length, // Offset em pé: continua de onde a ida parou
+    resultadoIda.bancosTraseiros, // Pula quem já foi para banco traseiro na ida
+    resultadoIda.bancosTraseiros.length // Offset bancos: continua de onde a ida parou
+  );
+
+  return {
+    ida: {
+      ...resultadoIda,
+      totalPresentes: presentesIda.length
+    },
+    volta: {
+      ...resultadoVolta,
+      totalPresentes: presentesVolta.length
+    }
+  };
+}
+
+/**
+ * Calcula os assentos de um trecho considerando exclusões e offset do ponteiro.
+ * 
+ * @param {Array} presentes - Lista de passageiros presentes no trecho
+ * @param {number} tipoRodizio - ID do ponteiro no banco (1 = ponteiro único)
+ * @param {Array} excluirDoRodizioEmPe - Passageiros que devem ser pulados do rodízio em pé
+ * @param {number} offsetPonteiroEmPe - Quanto avançar além do ponteiro de em pé
+ * @param {Array} excluirDoRodizioBancos - Passageiros que devem ser pulados do rodízio de bancos
+ * @param {number} offsetPonteiroBancos - Quanto avançar além do ponteiro de bancos
+ */
+function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodizioEmPe, offsetPonteiroEmPe, excluirDoRodizioBancos = [], offsetPonteiroBancos = 0) {
+  if (presentes.length === 0) {
+    return { sentados: [], emPe: [], bancosTraseiros: [], cadeirasFixas: [] };
+  }
+
+  // Separa passageiros com cadeira fixa dos demais
+  const cadeirasFixas = presentes.filter(p => p.cadeira_fixa === 1);
+  const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
+
+  const totalPresentes = presentes.length;
+  const lugaresDisponiveis = LIMITE_SENTADOS - cadeirasFixas.length;
+
+  // Caso todos caibam sentados
+  if (participantesRodizio.length <= lugaresDisponiveis) {
+    const sentados = [...cadeirasFixas, ...participantesRodizio];
+    let bancosTraseiros = [];
+    
+    if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
+      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+      bancosTraseiros = calcularBancosTraseirosComExclusao(
+        participantesRodizio, 
+        ponteiroBancos, 
+        totalPresentes, 
+        excluirDoRodizioBancos, 
+        offsetPonteiroBancos
+      );
+    }
+    return { sentados, emPe: [], bancosTraseiros, cadeirasFixas };
+  }
+
+  // IDs dos que devem ser pulados (já ficaram em pé no outro trecho)
+  const excluirIdsEmPe = new Set(excluirDoRodizioEmPe.map(p => p.id));
+
+  // Calcula quantos ficam em pé
+  const quantidadeEmPe = participantesRodizio.length - lugaresDisponiveis;
+
+  // Busca ponteiro de rodízio
+  const ponteiroBaseEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroBaseBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+
+  // Ordena TODOS os participantes A-Z (lista completa para manter ordem consistente)
+  const todosSortedAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
+  const totalParticipantes = todosSortedAZ.length;
+
+  // Ponteiro inicial considerando o offset (para volta continuar de onde ida parou)
+  const ponteiroInicialEmPe = (ponteiroBaseEmPe + offsetPonteiroEmPe) % totalParticipantes;
+
+  // Seleciona quem fica em pé, pulando os excluídos
+  const emPe = [];
+  let posicao = ponteiroInicialEmPe;
+  let tentativas = 0;
+  
+  while (emPe.length < quantidadeEmPe && tentativas < totalParticipantes) {
+    const candidato = todosSortedAZ[posicao % totalParticipantes];
+    
+    // Se não está na lista de exclusão, adiciona aos em pé
+    if (!excluirIdsEmPe.has(candidato.id)) {
+      emPe.push(candidato);
+    }
+    
+    posicao++;
+    tentativas++;
+  }
+
+  // Quem não está em pé, senta
+  const emPeIds = new Set(emPe.map(p => p.id));
+  const sentadosRodizio = participantesRodizio.filter(p => !emPeIds.has(p.id));
+
+  // Sentados = cadeiras fixas + sentados do rodízio
+  const sentados = [...cadeirasFixas, ...sentadosRodizio];
+
+  // Bancos traseiros só para quem participa do rodízio (sentados, não em pé)
+  const bancosTraseiros = calcularBancosTraseirosComExclusao(
+    sentadosRodizio, 
+    ponteiroBaseBancos, 
+    totalPresentes, 
+    excluirDoRodizioBancos, 
+    offsetPonteiroBancos
+  );
+
+  return { sentados, emPe, bancosTraseiros, cadeirasFixas };
+}
+
+/**
  * Seleciona passageiros sentados para os bancos traseiros usando o ponteiro.
  * Quantidade proporcional: 19 pessoas = 1 banco, 20 = 2, ..., 23+ = 5
  * Ordenação: Z-A (decrescente por nome)
+ * 
+ * @param {Array} sentados - Lista de sentados elegíveis para banco traseiro
+ * @param {number} ponteiro - Ponteiro base do rodízio
+ * @param {number} totalPresentes - Total de presentes para calcular quantos bancos
+ * @param {Array} excluir - Passageiros que devem ser pulados (já foram na ida)
+ * @param {number} offset - Quanto avançar além do ponteiro (para volta continuar da ida)
  */
-function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
+function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, excluir = [], offset = 0) {
   if (sentados.length === 0) return [];
   
   // Quantidade de bancos traseiros = passageiros acima de 18 (máximo 5)
@@ -159,43 +319,69 @@ function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
   const sentadosOrdenados = [...sentados].sort((a, b) => b.nome.localeCompare(a.nome));
   const total = sentadosOrdenados.length;
   
+  // IDs dos que devem ser pulados (já foram para banco traseiro na ida)
+  const excluirIds = new Set(excluir.map(p => p.id));
+  
+  // Ponteiro inicial considerando o offset
+  const ponteiroInicial = (ponteiro + offset) % total;
+  
   const resultado = [];
-  for (let i = 0; i < quantidade; i++) {
-    const idx = (ponteiro + i) % total;
-    resultado.push(sentadosOrdenados[idx]);
+  let posicao = ponteiroInicial;
+  let tentativas = 0;
+  
+  while (resultado.length < quantidade && tentativas < total) {
+    const candidato = sentadosOrdenados[posicao % total];
+    
+    // Se não está na lista de exclusão, adiciona
+    if (!excluirIds.has(candidato.id)) {
+      resultado.push(candidato);
+    }
+    
+    posicao++;
+    tentativas++;
   }
+  
   return resultado;
+}
+
+// Função legada mantida para compatibilidade
+function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
+  return calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, [], 0);
 }
 
 /**
  * Avança o ponteiro de rodízio de Em Pé para o próximo dia.
  * O ponteiro indica quem fica em pé (rodízio A-Z).
  * Avança pela quantidade de pessoas que ficaram em pé.
+ * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe) {
+function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe, tipoRodizio = 1) {
   if (quantidadeEmPe === 0 || participantesRodizio.length === 0) {
     // Ninguém em pé, ponteiro não muda
     return;
   }
-  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get().ponteiro;
+  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
   const novoPonteiro = (ponteiroAtual + quantidadeEmPe) % participantesRodizio.length;
-  db.prepare('UPDATE rotacao_assentos SET ponteiro = ? WHERE id = 1').run(novoPonteiro);
+  db.prepare('UPDATE rotacao_assentos SET ponteiro = ? WHERE id = ?').run(novoPonteiro, tipoRodizio);
 }
 
 /**
  * Avança o ponteiro de rodízio dos bancos traseiros.
+ * @param {Array} sentados - Lista de sentados que participam do rodízio
+ * @param {number} quantidade - Quantidade de bancos traseiros utilizados (ida + volta)
+ * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function avancarPonteiroBancos(sentados) {
+function avancarPonteiroBancos(sentados, quantidade, tipoRodizio = 1) {
   const total = sentados.length;
-  if (total === 0) return;
-  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
-  const novoPonteiro = (ponteiroAtual + BANCOS_TRASEIROS) % total;
-  db.prepare('UPDATE rotacao_bancos_traseiros SET ponteiro = ? WHERE id = 1').run(novoPonteiro);
+  if (total === 0 || quantidade === 0) return;
+  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+  const novoPonteiro = (ponteiroAtual + quantidade) % total;
+  db.prepare('UPDATE rotacao_bancos_traseiros SET ponteiro = ? WHERE id = ?').run(novoPonteiro, tipoRodizio);
 }
 
 /**
  * Gera e salva o relatório do dia no banco.
- * Também avança os ponteiros para o próximo dia.
+ * Também avança os ponteiros para o próximo dia (ida e volta separadamente).
  * Remove relatórios com mais de 30 dias.
  */
 function gerarRelatorioDoDia(data) {
@@ -219,20 +405,39 @@ function gerarRelatorioDoDia(data) {
     return { ...r, cadeira_fixa: passageiro?.cadeira_fixa || 0 };
   });
 
-  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeira);
+  // Calcula ida e volta separadamente
+  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeira);
 
-  // Calcula participantes do rodízio (sem cadeira fixa)
-  const participantesRodizio = respostasComCadeira.filter(r => r.cadeira_fixa !== 1);
+  // Calcula participantes do rodízio (sem cadeira fixa) para IDA
+  const presentesIda = respostasComCadeira.filter(r => 
+    r.resposta === 'vou_e_volto' || r.resposta === 'so_vou'
+  );
+  const participantesRodizioIda = presentesIda.filter(r => r.cadeira_fixa !== 1);
 
-  // Avança ponteiros para o próximo dia
-  avancarPonteiroAssentos(participantesRodizio, emPe.length);
-  avancarPonteiroBancos(sentados.filter(s => s.cadeira_fixa !== 1));
+  // Avança ponteiro único pela quantidade total de pessoas em pé (ida + volta)
+  // Isso mantém a ordem A-Z contínua entre os dias
+  const totalEmPe = ida.emPe.length + volta.emPe.length;
+  avancarPonteiroAssentos(participantesRodizioIda, totalEmPe, 1);
+  
+  // Avança ponteiro dos bancos traseiros pelo total (ida + volta)
+  // Isso mantém a ordem Z-A contínua entre os dias
+  const totalBancosTraseiros = ida.bancosTraseiros.length + volta.bancosTraseiros.length;
+  avancarPonteiroBancos(ida.sentados.filter(s => s.cadeira_fixa !== 1), totalBancosTraseiros, 1);
 
   const dadosJson = JSON.stringify({
     passageiros: respostas.map(r => ({ id: r.id, nome: r.nome, ordem: r.ordem, resposta: r.resposta })),
-    sentados: sentados.map(p => ({ id: p.id, nome: p.nome })),
-    emPe: emPe.map(p => ({ id: p.id, nome: p.nome })),
-    bancosTraseiros: bancosTraseiros.map(p => ({ id: p.id, nome: p.nome }))
+    ida: {
+      sentados: ida.sentados.map(p => ({ id: p.id, nome: p.nome })),
+      emPe: ida.emPe.map(p => ({ id: p.id, nome: p.nome })),
+      bancosTraseiros: ida.bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
+      totalPresentes: ida.totalPresentes
+    },
+    volta: {
+      sentados: volta.sentados.map(p => ({ id: p.id, nome: p.nome })),
+      emPe: volta.emPe.map(p => ({ id: p.id, nome: p.nome })),
+      bancosTraseiros: volta.bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
+      totalPresentes: volta.totalPresentes
+    }
   });
 
   // Insere ou substitui o relatório
@@ -246,8 +451,8 @@ function gerarRelatorioDoDia(data) {
     totalVouEVolto,
     totalSoVou,
     totalSoVolto,
-    sentados.length,
-    emPe.length,
+    ida.sentados.length + volta.sentados.length,
+    ida.emPe.length + volta.emPe.length,
     dadosJson
   );
 
@@ -257,7 +462,14 @@ function gerarRelatorioDoDia(data) {
     WHERE data < date('now', '-30 days')
   `).run();
 
-  return { totalPassageiros: respostas.length, totalVouEVolto, totalSoVou, totalSoVolto, sentados, emPe, bancosTraseiros };
+  return { 
+    totalPassageiros: respostas.length, 
+    totalVouEVolto, 
+    totalSoVou, 
+    totalSoVolto, 
+    ida, 
+    volta 
+  };
 }
 
 /**
@@ -419,7 +631,7 @@ app.delete('/api/passageiros/:id', limiteEscrita, (req, res) => {
 
 /**
  * GET /api/respostas
- * Retorna as respostas de hoje com dados calculados (sentados, em pé, bancos traseiros)
+ * Retorna as respostas de hoje com dados calculados separados para IDA e VOLTA
  */
 app.get('/api/respostas', (req, res) => {
   const data = getDataHoje();
@@ -447,7 +659,8 @@ app.get('/api/respostas', (req, res) => {
   const mapaRespostas = {};
   respostas.forEach(r => { mapaRespostas[r.id] = r.resposta; });
 
-  const { sentados, emPe, bancosTraseiros, cadeirasFixas } = calcularAssentosDoDia(respostasComCadeiraFixa);
+  // Calcula ida e volta separadamente
+  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   res.json({
     data,
@@ -455,14 +668,27 @@ app.get('/api/respostas', (req, res) => {
     respostas: mapaRespostas,
     resumo: {
       totalPassageiros: respostas.length,
-      totalSentados: sentados.length,
-      totalEmPe: emPe.length,
-      totalCadeirasFixas: cadeirasFixas.length
+      // Resumo IDA
+      totalPresentesIda: ida.totalPresentes,
+      totalSentadosIda: ida.sentados.length,
+      totalEmPeIda: ida.emPe.length,
+      // Resumo VOLTA
+      totalPresentesVolta: volta.totalPresentes,
+      totalSentadosVolta: volta.sentados.length,
+      totalEmPeVolta: volta.emPe.length
     },
-    sentados: sentados.map(p => ({ id: p.id, nome: p.nome, cadeira_fixa: p.cadeira_fixa })),
-    emPe: emPe.map(p => ({ id: p.id, nome: p.nome })),
-    bancosTraseiros: bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
-    cadeirasFixas: cadeirasFixas.map(p => ({ id: p.id, nome: p.nome }))
+    ida: {
+      sentados: ida.sentados.map(p => ({ id: p.id, nome: p.nome, cadeira_fixa: p.cadeira_fixa })),
+      emPe: ida.emPe.map(p => ({ id: p.id, nome: p.nome })),
+      bancosTraseiros: ida.bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
+      cadeirasFixas: ida.cadeirasFixas.map(p => ({ id: p.id, nome: p.nome }))
+    },
+    volta: {
+      sentados: volta.sentados.map(p => ({ id: p.id, nome: p.nome, cadeira_fixa: p.cadeira_fixa })),
+      emPe: volta.emPe.map(p => ({ id: p.id, nome: p.nome })),
+      bancosTraseiros: volta.bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
+      cadeirasFixas: volta.cadeirasFixas.map(p => ({ id: p.id, nome: p.nome }))
+    }
   });
 });
 
@@ -564,7 +790,7 @@ app.post('/api/relatorios/gerar', limiteEscrita, (req, res) => {
 
 /**
  * GET /api/relatorio/csv
- * Exporta o relatório de HOJE como CSV (atalho)
+ * Exporta o relatório de HOJE como CSV (atalho) - com IDA e VOLTA separados
  */
 app.get('/api/relatorio/csv', (req, res) => {
   const data = getDataHoje();
@@ -593,8 +819,8 @@ app.get('/api/relatorio/csv', (req, res) => {
     cadeira_fixa: mapaCadeiraFixa[r.id] || 0
   }));
 
-  // Calcula assentos do dia
-  const { emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeiraFixa);
+  // Calcula assentos separados para ida e volta
+  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   // Separa por tipo de resposta
   const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
@@ -615,18 +841,36 @@ app.get('/api/relatorio/csv', (req, res) => {
     csv += `${col1};${col2};${col3}\n`;
   }
 
-  // Seção: Em Pé
-  if (emPe.length > 0) {
-    csv += `\nEm Pé (${emPe.length} pessoa${emPe.length > 1 ? 's' : ''})\n`;
-    emPe.forEach((p, i) => {
+  // Seção: IDA
+  csv += `\n========== IDA (${ida.totalPresentes} pessoas) ==========\n`;
+  
+  if (ida.emPe.length > 0) {
+    csv += `\nEm Pé na IDA (${ida.emPe.length} pessoa${ida.emPe.length > 1 ? 's' : ''})\n`;
+    ida.emPe.forEach((p, i) => {
       csv += `${i + 1}. ${p.nome}\n`;
     });
   }
 
-  // Seção: Bancos Traseiros
-  if (bancosTraseiros.length > 0) {
-    csv += `\nBancos Traseiros (${bancosTraseiros.length})\n`;
-    bancosTraseiros.forEach((p, i) => {
+  if (ida.bancosTraseiros.length > 0) {
+    csv += `\nBancos Traseiros na IDA (${ida.bancosTraseiros.length})\n`;
+    ida.bancosTraseiros.forEach((p, i) => {
+      csv += `${i + 1}. ${p.nome}\n`;
+    });
+  }
+
+  // Seção: VOLTA
+  csv += `\n========== VOLTA (${volta.totalPresentes} pessoas) ==========\n`;
+  
+  if (volta.emPe.length > 0) {
+    csv += `\nEm Pé na VOLTA (${volta.emPe.length} pessoa${volta.emPe.length > 1 ? 's' : ''})\n`;
+    volta.emPe.forEach((p, i) => {
+      csv += `${i + 1}. ${p.nome}\n`;
+    });
+  }
+
+  if (volta.bancosTraseiros.length > 0) {
+    csv += `\nBancos Traseiros na VOLTA (${volta.bancosTraseiros.length})\n`;
+    volta.bancosTraseiros.forEach((p, i) => {
       csv += `${i + 1}. ${p.nome}\n`;
     });
   }
@@ -638,7 +882,7 @@ app.get('/api/relatorio/csv', (req, res) => {
 
 /**
  * GET /api/relatorio/pdf
- * Exporta o relatório de HOJE como PDF (atalho)
+ * Exporta o relatório de HOJE como PDF (atalho) - com IDA e VOLTA separados
  */
 app.get('/api/relatorio/pdf', (req, res) => {
   const data = getDataHoje();
@@ -667,8 +911,8 @@ app.get('/api/relatorio/pdf', (req, res) => {
     cadeira_fixa: mapaCadeiraFixa[r.id] || 0
   }));
 
-  // Calcula assentos do dia
-  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeiraFixa);
+  // Calcula assentos separados para ida e volta
+  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   // Separa por tipo
   const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
@@ -723,47 +967,84 @@ app.get('/api/relatorio/pdf', (req, res) => {
     }
   }
 
-  // Seção: Em Pé
-  if (emPe.length > 0) {
-    y += 20;
-    if (y > 700) {
-      doc.addPage();
-      y = 40;
-    }
+  // ========== SEÇÃO IDA ==========
+  y += 25;
+  if (y > 700) { doc.addPage(); y = 40; }
+  
+  doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a56db')
+     .text(`IDA (${ida.totalPresentes} pessoas)`, startX, y);
+  y += 25;
+
+  // Em Pé - IDA
+  if (ida.emPe.length > 0) {
+    if (y > 700) { doc.addPage(); y = 40; }
     
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c81e1e')
-       .text(`EM PE (${emPe.length} pessoa${emPe.length > 1 ? 's' : ''})`, startX, y);
-    y += 20;
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#c81e1e')
+       .text(`Em Pé na IDA (${ida.emPe.length} pessoa${ida.emPe.length > 1 ? 's' : ''})`, startX, y);
+    y += 18;
     
     doc.fontSize(9).font('Helvetica').fillColor('#000');
-    emPe.forEach((p, i) => {
-      if (y > 750) {
-        doc.addPage();
-        y = 40;
-      }
+    ida.emPe.forEach((p, i) => {
+      if (y > 750) { doc.addPage(); y = 40; }
       doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
       y += 14;
     });
+    y += 10;
   }
 
-  // Seção: Bancos Traseiros
-  if (bancosTraseiros.length > 0) {
-    y += 20;
-    if (y > 700) {
-      doc.addPage();
-      y = 40;
-    }
+  // Bancos Traseiros - IDA
+  if (ida.bancosTraseiros.length > 0) {
+    if (y > 700) { doc.addPage(); y = 40; }
     
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c27803')
-       .text(`BANCOS TRASEIROS (${bancosTraseiros.length})`, startX, y);
-    y += 20;
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
+       .text(`Bancos Traseiros na IDA (${ida.bancosTraseiros.length})`, startX, y);
+    y += 18;
     
     doc.fontSize(9).font('Helvetica').fillColor('#000');
-    bancosTraseiros.forEach((p, i) => {
-      if (y > 750) {
-        doc.addPage();
-        y = 40;
-      }
+    ida.bancosTraseiros.forEach((p, i) => {
+      if (y > 750) { doc.addPage(); y = 40; }
+      doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
+      y += 14;
+    });
+    y += 10;
+  }
+
+  // ========== SEÇÃO VOLTA ==========
+  y += 15;
+  if (y > 700) { doc.addPage(); y = 40; }
+  
+  doc.fontSize(14).font('Helvetica-Bold').fillColor('#057a55')
+     .text(`VOLTA (${volta.totalPresentes} pessoas)`, startX, y);
+  y += 25;
+
+  // Em Pé - VOLTA
+  if (volta.emPe.length > 0) {
+    if (y > 700) { doc.addPage(); y = 40; }
+    
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#c81e1e')
+       .text(`Em Pé na VOLTA (${volta.emPe.length} pessoa${volta.emPe.length > 1 ? 's' : ''})`, startX, y);
+    y += 18;
+    
+    doc.fontSize(9).font('Helvetica').fillColor('#000');
+    volta.emPe.forEach((p, i) => {
+      if (y > 750) { doc.addPage(); y = 40; }
+      doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
+      y += 14;
+    });
+    y += 10;
+  }
+
+  // Bancos Traseiros - VOLTA
+  if (volta.bancosTraseiros.length > 0) {
+    if (y > 700) { doc.addPage(); y = 40; }
+    
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
+       .text(`Bancos Traseiros na VOLTA (${volta.bancosTraseiros.length})`, startX, y);
+    y += 18;
+    
+    doc.fontSize(9).font('Helvetica').fillColor('#000');
+    volta.bancosTraseiros.forEach((p, i) => {
+      if (y > 750) { doc.addPage(); y = 40; }
       doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
       y += 14;
     });
@@ -774,7 +1055,7 @@ app.get('/api/relatorio/pdf', (req, res) => {
 
 /**
  * GET /api/relatorios/:data/csv
- * Exporta o relatório de uma data como CSV (formato 3 colunas)
+ * Exporta o relatório de uma data como CSV (formato 3 colunas) - com IDA e VOLTA separados
  */
 app.get('/api/relatorios/:data/csv', (req, res) => {
   const { data } = req.params;
@@ -813,17 +1094,47 @@ app.get('/api/relatorios/:data/csv', (req, res) => {
 
   linhas.push('');
 
-  // Seção de quem ficou em pé
-  if (dados.emPe.length > 0) {
-    linhas.push('"Passageiros em Pé:"');
-    dados.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
-    linhas.push('');
-  }
+  // Verifica se é formato novo (com ida/volta) ou antigo
+  if (dados.ida && dados.volta) {
+    // Formato novo: IDA e VOLTA separados
+    linhas.push(`"========== IDA (${dados.ida.totalPresentes || dados.ida.sentados.length} pessoas) =========="`);
+    
+    if (dados.ida.emPe && dados.ida.emPe.length > 0) {
+      linhas.push(`"Em Pé na IDA (${dados.ida.emPe.length}):"`);
+      dados.ida.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+      linhas.push('');
+    }
 
-  // Seção dos bancos traseiros
-  if (dados.bancosTraseiros.length > 0) {
-    linhas.push('"Bancos Traseiros do Dia:"');
-    dados.bancosTraseiros.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+    if (dados.ida.bancosTraseiros && dados.ida.bancosTraseiros.length > 0) {
+      linhas.push(`"Bancos Traseiros na IDA (${dados.ida.bancosTraseiros.length}):"`);
+      dados.ida.bancosTraseiros.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+      linhas.push('');
+    }
+
+    linhas.push(`"========== VOLTA (${dados.volta.totalPresentes || dados.volta.sentados.length} pessoas) =========="`);
+    
+    if (dados.volta.emPe && dados.volta.emPe.length > 0) {
+      linhas.push(`"Em Pé na VOLTA (${dados.volta.emPe.length}):"`);
+      dados.volta.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+      linhas.push('');
+    }
+
+    if (dados.volta.bancosTraseiros && dados.volta.bancosTraseiros.length > 0) {
+      linhas.push(`"Bancos Traseiros na VOLTA (${dados.volta.bancosTraseiros.length}):"`);
+      dados.volta.bancosTraseiros.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+    }
+  } else {
+    // Formato antigo: compatibilidade
+    if (dados.emPe && dados.emPe.length > 0) {
+      linhas.push('"Passageiros em Pé:"');
+      dados.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+      linhas.push('');
+    }
+
+    if (dados.bancosTraseiros && dados.bancosTraseiros.length > 0) {
+      linhas.push('"Bancos Traseiros do Dia:"');
+      dados.bancosTraseiros.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+    }
   }
 
   const csvContent = linhas.join('\n');
@@ -836,7 +1147,7 @@ app.get('/api/relatorios/:data/csv', (req, res) => {
 
 /**
  * GET /api/relatorios/:data/pdf
- * Exporta o relatório de uma data como PDF (formato com 3 colunas)
+ * Exporta o relatório de uma data como PDF (formato com 3 colunas) - com IDA e VOLTA separados
  */
 app.get('/api/relatorios/:data/pdf', (req, res) => {
   const { data } = req.params;
@@ -931,20 +1242,69 @@ app.get('/api/relatorios/:data/pdf', (req, res) => {
   
   doc.y = yAtual + 20;
 
-  // Seção: Passageiros em Pé (ao final)
-  if (dados.emPe.length > 0) {
+  // Verifica se é formato novo (com ida/volta) ou antigo
+  if (dados.ida && dados.volta) {
+    // ========== SEÇÃO IDA ==========
     doc.moveDown();
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c53030').text('Passageiros em Pé');
-    doc.fontSize(10).font('Helvetica').fillColor('#000000');
-    dados.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
-    doc.moveDown();
-  }
+    if (doc.y > 700) { doc.addPage(); }
+    
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a56db')
+       .text(`IDA (${dados.ida.totalPresentes || dados.ida.sentados.length} pessoas)`);
+    doc.moveDown(0.5);
 
-  // Seção: Bancos Traseiros (ao final)
-  if (dados.bancosTraseiros.length > 0) {
-    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c27803').text('Bancos Traseiros do Dia');
-    doc.fontSize(10).font('Helvetica').fillColor('#000000');
-    dados.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+    if (dados.ida.emPe && dados.ida.emPe.length > 0) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#c53030')
+         .text(`Em Pé na IDA (${dados.ida.emPe.length})`);
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.ida.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+      doc.moveDown(0.5);
+    }
+
+    if (dados.ida.bancosTraseiros && dados.ida.bancosTraseiros.length > 0) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
+         .text(`Bancos Traseiros na IDA (${dados.ida.bancosTraseiros.length})`);
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.ida.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+      doc.moveDown(0.5);
+    }
+
+    // ========== SEÇÃO VOLTA ==========
+    doc.moveDown();
+    if (doc.y > 700) { doc.addPage(); }
+    
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('#057a55')
+       .text(`VOLTA (${dados.volta.totalPresentes || dados.volta.sentados.length} pessoas)`);
+    doc.moveDown(0.5);
+
+    if (dados.volta.emPe && dados.volta.emPe.length > 0) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#c53030')
+         .text(`Em Pé na VOLTA (${dados.volta.emPe.length})`);
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.volta.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+      doc.moveDown(0.5);
+    }
+
+    if (dados.volta.bancosTraseiros && dados.volta.bancosTraseiros.length > 0) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
+         .text(`Bancos Traseiros na VOLTA (${dados.volta.bancosTraseiros.length})`);
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.volta.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+    }
+  } else {
+    // Formato antigo: compatibilidade
+    if (dados.emPe && dados.emPe.length > 0) {
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#c53030').text('Passageiros em Pé');
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+      doc.moveDown();
+    }
+
+    if (dados.bancosTraseiros && dados.bancosTraseiros.length > 0) {
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#c27803').text('Bancos Traseiros do Dia');
+      doc.fontSize(10).font('Helvetica').fillColor('#000000');
+      dados.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+    }
   }
 
   doc.end();
