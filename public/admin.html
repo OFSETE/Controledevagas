@@ -223,6 +223,179 @@
       display: none;
     }
     .login-erro.visivel { display: block; }
+
+    /* Seção de Passageiros */
+    .passageiros-header {
+      padding: 12px 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--cor-borda);
+      align-items: center;
+    }
+    .passageiros-header input {
+      flex: 1;
+      min-width: 200px;
+      padding: 8px 12px;
+      border: 2px solid var(--cor-borda);
+      border-radius: 6px;
+      font-size: .85rem;
+    }
+    .passageiros-header input:focus {
+      outline: none;
+      border-color: var(--cor-primaria);
+    }
+    .lista-passageiros {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .passageiro-linha {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--cor-borda);
+    }
+    .passageiro-linha:last-child { border-bottom: none; }
+    .passageiro-linha:hover { background: #f9fafb; }
+    .passageiro-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+    }
+    .passageiro-ordem {
+      width: 28px;
+      height: 28px;
+      background: var(--cor-fundo);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: .75rem;
+      font-weight: 700;
+      color: var(--cor-texto-suave);
+      flex-shrink: 0;
+    }
+    .passageiro-nome {
+      font-size: .9rem;
+      flex: 1;
+    }
+    .passageiro-acoes {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .btn-editar {
+      background: none;
+      border: none;
+      color: var(--cor-primaria);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: .75rem;
+      opacity: 0.6;
+      transition: opacity .2s;
+    }
+    .btn-editar:hover { opacity: 1; background: #dbeafe; }
+    .btn-remover {
+      background: none;
+      border: none;
+      color: var(--cor-perigo);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: .75rem;
+      opacity: 0.6;
+      transition: opacity .2s;
+    }
+    .btn-remover:hover { opacity: 1; background: #fee2e2; }
+    
+    /* Toggle de cadeira fixa */
+    .toggle-cadeira {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: .7rem;
+      font-weight: 600;
+      border: none;
+      transition: all .2s;
+    }
+    .toggle-cadeira.ativo {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .toggle-cadeira.inativo {
+      background: #f3f4f6;
+      color: #9ca3af;
+    }
+    .toggle-cadeira:hover {
+      opacity: 0.8;
+    }
+    
+    /* Badge cadeira fixa */
+    .badge-fixa {
+      font-size: .65rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #fef3c7;
+      color: #92400e;
+      margin-left: 6px;
+    }
+    
+    .contador-passageiros {
+      font-size: .8rem;
+      color: var(--cor-texto-suave);
+      padding: 8px 16px;
+      background: var(--cor-fundo);
+      border-top: 1px solid var(--cor-borda);
+    }
+    
+    /* Modal de edição */
+    .modal-editar {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 300;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-editar.aberto { display: flex; }
+    .modal-editar-content {
+      background: #fff;
+      border-radius: var(--raio);
+      padding: 24px;
+      max-width: 400px;
+      width: 100%;
+    }
+    .modal-editar-content h3 {
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+    }
+    .modal-editar-content input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid var(--cor-borda);
+      border-radius: 6px;
+      font-size: .95rem;
+      margin-bottom: 16px;
+    }
+    .modal-editar-content input:focus {
+      outline: none;
+      border-color: var(--cor-primaria);
+    }
+    .modal-editar-btns {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
   </style>
 </head>
 <body>
@@ -238,13 +411,44 @@
   </div>
 </div>
 
+<!-- Modal de edição de nome -->
+<div class="modal-editar" id="modal-editar">
+  <div class="modal-editar-content">
+    <h3>✏️ Editar Passageiro</h3>
+    <input type="hidden" id="editar-id">
+    <input type="text" id="editar-nome" placeholder="Nome do passageiro">
+    <div class="modal-editar-btns">
+      <button class="btn btn-primario" onclick="fecharModalEditar()">Cancelar</button>
+      <button class="btn btn-sucesso" onclick="salvarEdicao()">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <h1>⚙️ Painel Administrativo</h1>
-  <p>Histórico de Relatórios — Últimos 15 dias</p>
+  <p>Gerenciamento do Sistema</p>
 </header>
 
 <div class="container">
 
+  <!-- Card de Gerenciamento de Passageiros -->
+  <div class="card">
+    <div class="card-titulo">👥 Gerenciar Lista de Passageiros</div>
+    <div class="passageiros-header">
+      <input type="text" id="novo-passageiro" placeholder="Nome do novo passageiro..." />
+      <button class="btn btn-sucesso" onclick="adicionarPassageiro()">➕ Adicionar</button>
+      <button class="btn btn-primario" onclick="carregarPassageiros()">🔄 Atualizar</button>
+    </div>
+    <p style="padding: 8px 16px; font-size: .75rem; color: var(--cor-texto-suave); margin: 0; background: #fffbeb; border-bottom: 1px solid var(--cor-borda);">
+      🪑 <strong>Cadeira Fixa:</strong> Pessoas com problemas de coluna ficam sempre sentadas e não participam dos rodízios.
+    </p>
+    <div id="lista-passageiros-container" class="lista-passageiros">
+      <div class="loading">Carregando passageiros...</div>
+    </div>
+    <div class="contador-passageiros" id="contador-passageiros">Total: 0 passageiros</div>
+  </div>
+
+  <!-- Card de Relatórios -->
   <div class="card">
     <div class="card-titulo">📁 Relatórios Salvos</div>
     <div class="acoes-topo">
@@ -413,20 +617,28 @@
     }
   }
 
-  // Verifica a senha de acesso
-  const SENHA_ADMIN = '147258';
-
-  function verificarSenha() {
+  // Verifica a senha de acesso via API
+  async function verificarSenha() {
     const senha = document.getElementById('senha-input').value;
     const erroEl = document.getElementById('login-erro');
     
-    if (senha === SENHA_ADMIN) {
-      document.getElementById('login-overlay').classList.add('oculto');
-      erroEl.classList.remove('visivel');
-    } else {
-      erroEl.classList.add('visivel');
-      document.getElementById('senha-input').value = '';
-      document.getElementById('senha-input').focus();
+    try {
+      const resp = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senha })
+      });
+      
+      if (resp.ok) {
+        document.getElementById('login-overlay').classList.add('oculto');
+        erroEl.classList.remove('visivel');
+      } else {
+        erroEl.classList.add('visivel');
+        document.getElementById('senha-input').value = '';
+        document.getElementById('senha-input').focus();
+      }
+    } catch (error) {
+      alert('❌ Erro de conexão com o servidor');
     }
   }
 
@@ -435,10 +647,172 @@
     if (e.key === 'Enter') verificarSenha();
   });
 
+  // Permite pressionar Enter para adicionar passageiro
+  document.getElementById('novo-passageiro').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') adicionarPassageiro();
+  });
+
+  // ─────────────────────────────────────────────
+  // Gerenciamento de Passageiros
+  // ─────────────────────────────────────────────
+
+  // Carrega lista de passageiros
+  async function carregarPassageiros() {
+    const container = document.getElementById('lista-passageiros-container');
+    container.innerHTML = '<div class="loading">Carregando...</div>';
+
+    const resp = await fetch('/api/passageiros');
+    const passageiros = await resp.json();
+
+    if (passageiros.length === 0) {
+      container.innerHTML = '<div class="loading">Nenhum passageiro cadastrado.</div>';
+      document.getElementById('contador-passageiros').textContent = 'Total: 0 passageiros';
+      return;
+    }
+
+    const cadeirasFixas = passageiros.filter(p => p.cadeira_fixa === 1).length;
+
+    container.innerHTML = passageiros.map(p => `
+      <div class="passageiro-linha" data-id="${p.id}">
+        <div class="passageiro-info">
+          <span class="passageiro-ordem">${p.ordem}</span>
+          <span class="passageiro-nome">
+            ${p.nome}
+            ${p.cadeira_fixa ? '<span class="badge-fixa">🪑 Fixa</span>' : ''}
+          </span>
+        </div>
+        <div class="passageiro-acoes">
+          <button class="toggle-cadeira ${p.cadeira_fixa ? 'ativo' : 'inativo'}" 
+                  onclick="toggleCadeiraFixa(${p.id}, ${p.cadeira_fixa ? 0 : 1})"
+                  title="${p.cadeira_fixa ? 'Remover cadeira fixa' : 'Marcar como cadeira fixa'}">
+            🪑 ${p.cadeira_fixa ? 'Fixa' : 'Normal'}
+          </button>
+          <button class="btn-editar" onclick="abrirModalEditar(${p.id}, '${p.nome.replace(/'/g, "\\'")}')">✏️ Editar</button>
+          <button class="btn-remover" onclick="removerPassageiro(${p.id}, '${p.nome.replace(/'/g, "\\'")}')">✕ Remover</button>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('contador-passageiros').textContent = 
+      `Total: ${passageiros.length} passageiros${cadeirasFixas > 0 ? ` (${cadeirasFixas} com cadeira fixa)` : ''}`;
+  }
+
+  // Toggle cadeira fixa
+  async function toggleCadeiraFixa(id, novoValor) {
+    const resp = await fetch(`/api/passageiros/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cadeira_fixa: novoValor === 1 })
+    });
+
+    if (resp.ok) {
+      carregarPassageiros();
+    } else {
+      const dados = await resp.json();
+      alert(`❌ Erro: ${dados.erro}`);
+    }
+  }
+
+  // Abre modal de edição
+  function abrirModalEditar(id, nome) {
+    document.getElementById('editar-id').value = id;
+    document.getElementById('editar-nome').value = nome;
+    document.getElementById('modal-editar').classList.add('aberto');
+    document.getElementById('editar-nome').focus();
+  }
+
+  // Fecha modal de edição
+  function fecharModalEditar() {
+    document.getElementById('modal-editar').classList.remove('aberto');
+  }
+
+  // Salva edição do nome
+  async function salvarEdicao() {
+    const id = document.getElementById('editar-id').value;
+    const nome = document.getElementById('editar-nome').value.trim();
+
+    if (!nome) {
+      alert('❌ Nome não pode estar vazio');
+      return;
+    }
+
+    const resp = await fetch(`/api/passageiros/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome })
+    });
+
+    const dados = await resp.json();
+
+    if (resp.ok) {
+      alert(`✅ Nome atualizado com sucesso!`);
+      fecharModalEditar();
+      carregarPassageiros();
+    } else {
+      alert(`❌ Erro: ${dados.erro}`);
+    }
+  }
+
+  // Permite Enter no modal de edição
+  document.getElementById('editar-nome').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') salvarEdicao();
+  });
+
+  // Fecha modal ao clicar fora
+  document.getElementById('modal-editar').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-editar') fecharModalEditar();
+  });
+
+  // Adiciona novo passageiro
+  async function adicionarPassageiro() {
+    const input = document.getElementById('novo-passageiro');
+    const nome = input.value.trim();
+
+    if (!nome) {
+      alert('❌ Digite o nome do passageiro');
+      input.focus();
+      return;
+    }
+
+    const resp = await fetch('/api/passageiros', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome })
+    });
+
+    const dados = await resp.json();
+
+    if (resp.ok) {
+      alert(`✅ Passageiro "${dados.nome}" adicionado com sucesso!`);
+      input.value = '';
+      carregarPassageiros();
+    } else {
+      alert(`❌ Erro: ${dados.erro}`);
+    }
+  }
+
+  // Remove passageiro
+  async function removerPassageiro(id, nome) {
+    if (!confirm(`🗑️ Tem certeza que deseja remover "${nome}" da lista?`)) {
+      return;
+    }
+
+    const resp = await fetch(`/api/passageiros/${id}`, { method: 'DELETE' });
+    const dados = await resp.json();
+
+    if (resp.ok) {
+      alert(`✅ Passageiro "${dados.removido}" removido com sucesso!`);
+      carregarPassageiros();
+    } else {
+      alert(`❌ Erro: ${dados.erro}`);
+    }
+  }
+
   // Sempre pede senha ao acessar
   document.getElementById('senha-input').focus();
 
   // Inicialização
+  carregarPassageiros();
   carregarRelatorios();
 </script>
 </body>

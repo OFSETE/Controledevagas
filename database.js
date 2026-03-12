@@ -24,9 +24,17 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS passageiros (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL UNIQUE,
-      ordem INTEGER NOT NULL
+      ordem INTEGER NOT NULL,
+      cadeira_fixa INTEGER NOT NULL DEFAULT 0
     )
   `);
+
+  // Adiciona coluna cadeira_fixa se não existir (para bancos existentes)
+  try {
+    db.exec(`ALTER TABLE passageiros ADD COLUMN cadeira_fixa INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    // Coluna já existe, ignorar
+  }
 
   // Tabela de respostas diárias da enquete
   db.exec(`

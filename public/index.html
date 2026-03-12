@@ -248,6 +248,24 @@
     /* Loading */
     .loading { text-align: center; padding: 30px; color: var(--cor-texto-suave); font-size: .9rem; }
 
+    /* Botões de relatório */
+    .btn-relatorio {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      background: var(--cor-sucesso);
+      color: #fff;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: .85rem;
+      font-weight: 600;
+      margin: 4px;
+      transition: opacity .2s;
+    }
+    .btn-relatorio:hover { opacity: .85; }
+    .btn-relatorio.btn-pdf { background: var(--cor-perigo); }
+
     /* Modal de seleção de usuário */
     .modal-overlay {
       position: fixed;
@@ -363,6 +381,16 @@
     <div id="minha-votacao"></div>
   </div>
 
+  <!-- Card de votação encerrada -->
+  <div class="card" id="card-votacao-encerrada" style="display: none;">
+    <div class="card-titulo">🔒 Votação Encerrada</div>
+    <div style="padding: 16px; text-align: center;">
+      <p style="margin-bottom: 12px; color: var(--cor-texto-suave);">A votação de hoje já foi encerrada.</p>
+      <a href="/api/relatorio/csv" class="btn-relatorio" download>📄 Baixar Relatório CSV</a>
+      <a href="/api/relatorio/pdf" class="btn-relatorio btn-pdf" download>📄 Baixar Relatório PDF</a>
+    </div>
+  </div>
+
   <!-- Resumo do dia -->
   <div class="card">
     <div class="card-titulo">📊 Resumo do Dia</div>
@@ -398,8 +426,8 @@
     </div>
   </div>
 
-  <!-- Bancos traseiros -->
-  <div class="card">
+  <!-- Bancos traseiros (só aparece quando > 18 passageiros) -->
+  <div class="card" id="card-bancos-traseiros" style="display: none;">
     <div class="card-titulo">🔙 Bancos Traseiros do Dia</div>
     <div class="bancos-lista" id="lista-bancos">
       <div class="vazio">Nenhum passageiro confirmado ainda.</div>
@@ -627,14 +655,33 @@
       ).join('');
     }
 
-    // Atualiza bancos traseiros
+    // Atualiza bancos traseiros (só mostra se > 18 passageiros)
+    const cardBancos = document.getElementById('card-bancos-traseiros');
     const divBancos = document.getElementById('lista-bancos');
-    if (dados.bancosTraseiros.length === 0) {
-      divBancos.innerHTML = '<div class="vazio">Nenhum passageiro confirmado ainda.</div>';
-    } else {
+    
+    if (dados.resumo.totalPassageiros > 18 && dados.bancosTraseiros.length > 0) {
+      cardBancos.style.display = 'block';
       divBancos.innerHTML = dados.bancosTraseiros.map((p, i) =>
         `<div class="banco-item"><span class="banco-num">${i + 1}</span>${p.nome}</div>`
       ).join('');
+    } else {
+      cardBancos.style.display = 'none';
+    }
+
+    // Controla exibição baseado em podeVotar
+    const cardMinhaVotacao = document.getElementById('card-minha-votacao');
+    const cardVotacaoEncerrada = document.getElementById('card-votacao-encerrada');
+    
+    if (dados.podeVotar) {
+      // Votação aberta - mostra card de votação se usuário logado
+      if (usuarioAtual) {
+        cardMinhaVotacao.style.display = 'block';
+      }
+      cardVotacaoEncerrada.style.display = 'none';
+    } else {
+      // Votação encerrada - esconde votação e mostra relatório
+      cardMinhaVotacao.style.display = 'none';
+      cardVotacaoEncerrada.style.display = 'block';
     }
   }
 

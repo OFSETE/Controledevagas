@@ -4,6 +4,7 @@
  * Sistema de Controle de Presença do Ônibus
  */
 
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
@@ -14,10 +15,11 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Limite de assentos sentados no ônibus
-const LIMITE_SENTADOS = 23;
-// Quantidade de bancos traseiros
-const BANCOS_TRASEIROS = 5;
+// Configurações do sistema (via .env ou valores padrão)
+const LIMITE_SENTADOS = parseInt(process.env.LIMITE_SENTADOS) || 23;
+const BANCOS_TRASEIROS = parseInt(process.env.BANCOS_TRASEIROS) || 5;
+const LIMITE_PARA_BANCOS_TRASEIROS = parseInt(process.env.LIMITE_PARA_BANCOS_TRASEIROS) || 18;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '147258';
 
 // Middleware para parsing de JSON e arquivos estáticos
 app.use(express.json());
@@ -75,72 +77,108 @@ function podeVotar() {
 
 /**
  * Calcula os assentos do dia com base nas respostas e no ponteiro de rodízio.
- * Retorna { sentados, emPe, bancosTranseiros }
+ * Retorna { sentados, emPe, bancosTranseiros, cadeirasFixas }
+ * Nota: bancos traseiros só são calculados quando há mais de 18 passageiros
+ * Nota: pessoas com cadeira_fixa são sempre sentadas e não participam dos rodízios
+ * 
+ * Rodízio Em Pé: A-Z (Ana primeiro, depois Antônia, etc.)
+ * Rodízio Bancos Traseiros: Z-A (Vitória primeiro, depois Raimundo, etc.)
  */
 function calcularAssentosDoDia(presentes) {
   if (presentes.length === 0) {
-    return { sentados: [], emPe: [], bancosTraseiros: [] };
+    return { sentados: [], emPe: [], bancosTraseiros: [], cadeirasFixas: [] };
   }
+
+  // Separa passageiros com cadeira fixa dos demais
+  const cadeirasFixas = presentes.filter(p => p.cadeira_fixa === 1);
+  const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
 
   const totalPresentes = presentes.length;
+  const lugaresDisponiveis = LIMITE_SENTADOS - cadeirasFixas.length;
 
-  if (totalPresentes <= LIMITE_SENTADOS) {
-    // Todos sentados – ainda assim calculamos os 5 bancos traseiros
-    const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
-    const bancosTraseiros = calcularBancosTraseiros(presentes, ponteiroBancos);
-    return { sentados: presentes, emPe: [], bancosTraseiros };
+  // Caso todos caibam sentados
+  if (participantesRodizio.length <= lugaresDisponiveis) {
+    // Todos sentados
+    const sentados = [...cadeirasFixas, ...participantesRodizio];
+    let bancosTraseiros = [];
+    
+    // Bancos traseiros só se > 18 pessoas (excluindo cadeiras fixas do rodízio)
+    if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
+      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
+      bancosTraseiros = calcularBancosTraseiros(participantesRodizio, ponteiroBancos, totalPresentes);
+    }
+    return { sentados, emPe: [], bancosTraseiros, cadeirasFixas };
   }
 
-  // Busca ponteiro de rodízio
-  const ponteiroAssentos = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get().ponteiro;
+  // Busca ponteiros de rodízio
+  const ponteiroEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get().ponteiro;
   const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get().ponteiro;
 
-  // Ordena presentes pela ordem da lista fixa
-  const presentesOrdenados = [...presentes].sort((a, b) => a.ordem - b.ordem);
-  const total = presentesOrdenados.length;
+  // Ordena participantes A-Z para rodízio de em pé
+  const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
+  const total = participantesAZ.length;
+  
+  // Calcula quantos ficam em pé
+  const quantidadeEmPe = total - lugaresDisponiveis;
 
-  // Aplica rodízio – começa do ponteiro (circular)
-  const sentados = [];
-  for (let i = 0; i < LIMITE_SENTADOS; i++) {
-    const idx = (ponteiroAssentos + i) % total;
-    sentados.push(presentesOrdenados[idx]);
+  // Seleciona quem fica em pé usando o ponteiro (rodízio A-Z)
+  const emPe = [];
+  for (let i = 0; i < quantidadeEmPe; i++) {
+    const idx = (ponteiroEmPe + i) % total;
+    emPe.push(participantesAZ[idx]);
   }
 
-  const sentadosIds = new Set(sentados.map(p => p.id));
-  const emPe = presentesOrdenados.filter(p => !sentadosIds.has(p.id));
+  // Quem não está em pé, senta
+  const emPeIds = new Set(emPe.map(p => p.id));
+  const sentadosRodizio = participantesRodizio.filter(p => !emPeIds.has(p.id));
 
-  const bancosTraseiros = calcularBancosTraseiros(sentados, ponteiroBancos);
+  // Sentados = cadeiras fixas + sentados do rodízio
+  const sentados = [...cadeirasFixas, ...sentadosRodizio];
 
-  return { sentados, emPe, bancosTraseiros };
+  // Bancos traseiros só para quem participa do rodízio (sentados, não em pé)
+  const bancosTraseiros = calcularBancosTraseiros(sentadosRodizio, ponteiroBancos, totalPresentes);
+
+  return { sentados, emPe, bancosTraseiros, cadeirasFixas };
 }
 
 /**
- * Seleciona 5 passageiros sentados para os bancos traseiros usando o ponteiro.
+ * Seleciona passageiros sentados para os bancos traseiros usando o ponteiro.
+ * Quantidade proporcional: 19 pessoas = 1 banco, 20 = 2, ..., 23+ = 5
+ * Ordenação: Z-A (decrescente por nome)
  */
-function calcularBancosTraseiros(sentados, ponteiro) {
+function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
   if (sentados.length === 0) return [];
-  const total = sentados.length;
-  const quantidade = Math.min(BANCOS_TRASEIROS, total);
+  
+  // Quantidade de bancos traseiros = passageiros acima de 18 (máximo 5)
+  const bancosNecessarios = Math.max(0, totalPresentes - LIMITE_PARA_BANCOS_TRASEIROS);
+  const quantidade = Math.min(BANCOS_TRASEIROS, bancosNecessarios, sentados.length);
+  
+  if (quantidade === 0) return [];
+  
+  // Ordena Z-A (decrescente por nome) para rodízio
+  const sentadosOrdenados = [...sentados].sort((a, b) => b.nome.localeCompare(a.nome));
+  const total = sentadosOrdenados.length;
+  
   const resultado = [];
   for (let i = 0; i < quantidade; i++) {
     const idx = (ponteiro + i) % total;
-    resultado.push(sentados[idx]);
+    resultado.push(sentadosOrdenados[idx]);
   }
   return resultado;
 }
 
 /**
- * Avança o ponteiro de rodízio de assentos para o próximo dia.
- * O próximo ponto deve ser o índice seguinte ao último sentado do dia.
+ * Avança o ponteiro de rodízio de Em Pé para o próximo dia.
+ * O ponteiro indica quem fica em pé (rodízio A-Z).
+ * Avança pela quantidade de pessoas que ficaram em pé.
  */
-function avancarPonteiroAssentos(presentes) {
-  const totalPresentes = presentes.length;
-  if (totalPresentes <= LIMITE_SENTADOS) {
-    // Todos sentados, ponteiro não muda
+function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe) {
+  if (quantidadeEmPe === 0 || participantesRodizio.length === 0) {
+    // Ninguém em pé, ponteiro não muda
     return;
   }
   const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get().ponteiro;
-  const novoPonteiro = (ponteiroAtual + LIMITE_SENTADOS) % totalPresentes;
+  const novoPonteiro = (ponteiroAtual + quantidadeEmPe) % participantesRodizio.length;
   db.prepare('UPDATE rotacao_assentos SET ponteiro = ? WHERE id = 1').run(novoPonteiro);
 }
 
@@ -158,7 +196,7 @@ function avancarPonteiroBancos(sentados) {
 /**
  * Gera e salva o relatório do dia no banco.
  * Também avança os ponteiros para o próximo dia.
- * Remove relatórios com mais de 15 dias.
+ * Remove relatórios com mais de 30 dias.
  */
 function gerarRelatorioDoDia(data) {
   const respostas = db.prepare(`
@@ -175,11 +213,20 @@ function gerarRelatorioDoDia(data) {
   const totalSoVou = respostas.filter(r => r.resposta === 'so_vou').length;
   const totalSoVolto = respostas.filter(r => r.resposta === 'so_volto').length;
 
-  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostas);
+  // Busca informação de cadeira_fixa para respostas
+  const respostasComCadeira = respostas.map(r => {
+    const passageiro = db.prepare('SELECT cadeira_fixa FROM passageiros WHERE id = ?').get(r.id);
+    return { ...r, cadeira_fixa: passageiro?.cadeira_fixa || 0 };
+  });
+
+  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeira);
+
+  // Calcula participantes do rodízio (sem cadeira fixa)
+  const participantesRodizio = respostasComCadeira.filter(r => r.cadeira_fixa !== 1);
 
   // Avança ponteiros para o próximo dia
-  avancarPonteiroAssentos(respostas);
-  avancarPonteiroBancos(sentados);
+  avancarPonteiroAssentos(participantesRodizio, emPe.length);
+  avancarPonteiroBancos(sentados.filter(s => s.cadeira_fixa !== 1));
 
   const dadosJson = JSON.stringify({
     passageiros: respostas.map(r => ({ id: r.id, nome: r.nome, ordem: r.ordem, resposta: r.resposta })),
@@ -204,10 +251,10 @@ function gerarRelatorioDoDia(data) {
     dadosJson
   );
 
-  // Remove relatórios com mais de 15 dias
+  // Remove relatórios com mais de 30 dias
   db.prepare(`
     DELETE FROM relatorios
-    WHERE data < date('now', '-15 days')
+    WHERE data < date('now', '-30 days')
   `).run();
 
   return { totalPassageiros: respostas.length, totalVouEVolto, totalSoVou, totalSoVolto, sentados, emPe, bancosTraseiros };
@@ -221,14 +268,31 @@ function limparRespostasDia(data) {
 }
 
 // ─────────────────────────────────────────────
-// Agendamento: reset diário às 00:00
+// Agendamento: gerar relatório às 15:30
+// ─────────────────────────────────────────────
+cron.schedule('30 15 * * *', () => {
+  const dataHoje = getDataHoje();
+  console.log(`[CRON] Gerando relatório do dia ${dataHoje}...`);
+  const resultado = gerarRelatorioDoDia(dataHoje);
+  if (resultado) {
+    console.log(`[CRON] Relatório gerado: ${resultado.totalPassageiros} passageiros`);
+  } else {
+    console.log(`[CRON] Nenhuma resposta para gerar relatório`);
+  }
+});
+
+// ─────────────────────────────────────────────
+// Agendamento: limpar respostas antigas às 00:00
 // ─────────────────────────────────────────────
 cron.schedule('0 0 * * *', () => {
-  const dataHoje = getDataHoje();
-  console.log(`[CRON] Reset diário iniciado para ${dataHoje}`);
-  gerarRelatorioDoDia(dataHoje);
-  limparRespostasDia(dataHoje);
-  console.log(`[CRON] Reset diário concluído`);
+  // Calcula a data de ontem
+  const ontem = new Date();
+  ontem.setDate(ontem.getDate() - 1);
+  const dataOntem = `${ontem.getFullYear()}-${String(ontem.getMonth() + 1).padStart(2, '0')}-${String(ontem.getDate()).padStart(2, '0')}`;
+  
+  console.log(`[CRON] Limpando respostas do dia ${dataOntem}...`);
+  limparRespostasDia(dataOntem);
+  console.log(`[CRON] Limpeza concluída`);
 });
 
 // ─────────────────────────────────────────────
@@ -236,12 +300,121 @@ cron.schedule('0 0 * * *', () => {
 // ─────────────────────────────────────────────
 
 /**
+ * POST /api/admin/login
+ * Verifica a senha de administração
+ * Body: { senha }
+ */
+app.post('/api/admin/login', limiteEscrita, (req, res) => {
+  const { senha } = req.body;
+  
+  if (senha === ADMIN_PASSWORD) {
+    res.json({ sucesso: true });
+  } else {
+    res.status(401).json({ erro: 'Senha incorreta' });
+  }
+});
+
+/**
  * GET /api/passageiros
  * Retorna lista de todos os passageiros em ordem alfabética
  */
 app.get('/api/passageiros', (req, res) => {
-  const passageiros = db.prepare('SELECT id, nome, ordem FROM passageiros ORDER BY ordem').all();
+  const passageiros = db.prepare('SELECT id, nome, ordem, cadeira_fixa FROM passageiros ORDER BY ordem').all();
   res.json(passageiros);
+});
+
+/**
+ * POST /api/passageiros
+ * Adiciona um novo passageiro
+ * Body: { nome }
+ */
+app.post('/api/passageiros', limiteEscrita, (req, res) => {
+  const { nome } = req.body;
+
+  if (!nome || nome.trim() === '') {
+    return res.status(400).json({ erro: 'Nome é obrigatório' });
+  }
+
+  const nomeNormalizado = nome.trim();
+
+  // Verifica se já existe
+  const existente = db.prepare('SELECT id FROM passageiros WHERE nome = ?').get(nomeNormalizado);
+  if (existente) {
+    return res.status(409).json({ erro: 'Passageiro já existe na lista' });
+  }
+
+  // Pega a última ordem e adiciona +1
+  const ultimaOrdem = db.prepare('SELECT MAX(ordem) as max FROM passageiros').get();
+  const novaOrdem = (ultimaOrdem.max || 0) + 1;
+
+  const result = db.prepare('INSERT INTO passageiros (nome, ordem) VALUES (?, ?)').run(nomeNormalizado, novaOrdem);
+  
+  res.json({ sucesso: true, id: result.lastInsertRowid, nome: nomeNormalizado, ordem: novaOrdem });
+});
+
+/**
+ * PUT /api/passageiros/:id
+ * Edita um passageiro (nome e/ou cadeira_fixa)
+ * Body: { nome?, cadeira_fixa? }
+ */
+app.put('/api/passageiros/:id', limiteEscrita, (req, res) => {
+  const { id } = req.params;
+  const { nome, cadeira_fixa } = req.body;
+
+  // Verifica se o passageiro existe
+  const passageiro = db.prepare('SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?').get(id);
+  if (!passageiro) {
+    return res.status(404).json({ erro: 'Passageiro não encontrado' });
+  }
+
+  // Atualiza nome se fornecido
+  if (nome !== undefined && nome.trim() !== '') {
+    const nomeNormalizado = nome.trim();
+    // Verifica se outro passageiro já tem esse nome
+    const existente = db.prepare('SELECT id FROM passageiros WHERE nome = ? AND id != ?').get(nomeNormalizado, id);
+    if (existente) {
+      return res.status(409).json({ erro: 'Já existe outro passageiro com esse nome' });
+    }
+    db.prepare('UPDATE passageiros SET nome = ? WHERE id = ?').run(nomeNormalizado, id);
+  }
+
+  // Atualiza cadeira_fixa se fornecido
+  if (cadeira_fixa !== undefined) {
+    const valor = cadeira_fixa ? 1 : 0;
+    db.prepare('UPDATE passageiros SET cadeira_fixa = ? WHERE id = ?').run(valor, id);
+  }
+
+  // Retorna passageiro atualizado
+  const atualizado = db.prepare('SELECT id, nome, ordem, cadeira_fixa FROM passageiros WHERE id = ?').get(id);
+  res.json({ sucesso: true, passageiro: atualizado });
+});
+
+/**
+ * DELETE /api/passageiros/:id
+ * Remove um passageiro da lista
+ */
+app.delete('/api/passageiros/:id', limiteEscrita, (req, res) => {
+  const { id } = req.params;
+
+  // Verifica se o passageiro existe
+  const passageiro = db.prepare('SELECT id, nome FROM passageiros WHERE id = ?').get(id);
+  if (!passageiro) {
+    return res.status(404).json({ erro: 'Passageiro não encontrado' });
+  }
+
+  // Remove respostas do dia associadas
+  db.prepare('DELETE FROM respostas_dia WHERE passageiro_id = ?').run(id);
+  
+  // Remove o passageiro
+  db.prepare('DELETE FROM passageiros WHERE id = ?').run(id);
+
+  // Reordena os passageiros restantes
+  const passageiros = db.prepare('SELECT id FROM passageiros ORDER BY ordem').all();
+  passageiros.forEach((p, index) => {
+    db.prepare('UPDATE passageiros SET ordem = ? WHERE id = ?').run(index + 1, p.id);
+  });
+
+  res.json({ sucesso: true, removido: passageiro.nome });
 });
 
 /**
@@ -259,23 +432,37 @@ app.get('/api/respostas', (req, res) => {
     ORDER BY p.ordem
   `).all(data);
 
+  // Busca informação de cadeira_fixa para cada passageiro
+  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const mapaCadeiraFixa = {};
+  passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
+
+  // Adiciona cadeira_fixa às respostas
+  const respostasComCadeiraFixa = respostas.map(r => ({
+    ...r,
+    cadeira_fixa: mapaCadeiraFixa[r.id] || 0
+  }));
+
   // Mapa de id -> resposta para fácil consulta no frontend
   const mapaRespostas = {};
   respostas.forEach(r => { mapaRespostas[r.id] = r.resposta; });
 
-  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostas);
+  const { sentados, emPe, bancosTraseiros, cadeirasFixas } = calcularAssentosDoDia(respostasComCadeiraFixa);
 
   res.json({
     data,
+    podeVotar: podeVotar(),
     respostas: mapaRespostas,
     resumo: {
       totalPassageiros: respostas.length,
       totalSentados: sentados.length,
-      totalEmPe: emPe.length
+      totalEmPe: emPe.length,
+      totalCadeirasFixas: cadeirasFixas.length
     },
-    sentados: sentados.map(p => ({ id: p.id, nome: p.nome })),
+    sentados: sentados.map(p => ({ id: p.id, nome: p.nome, cadeira_fixa: p.cadeira_fixa })),
     emPe: emPe.map(p => ({ id: p.id, nome: p.nome })),
-    bancosTraseiros: bancosTraseiros.map(p => ({ id: p.id, nome: p.nome }))
+    bancosTraseiros: bancosTraseiros.map(p => ({ id: p.id, nome: p.nome })),
+    cadeirasFixas: cadeirasFixas.map(p => ({ id: p.id, nome: p.nome }))
   });
 });
 
@@ -336,7 +523,7 @@ app.delete('/api/respostas/:passageiro_id', limiteEscrita, (req, res) => {
 
 /**
  * GET /api/relatorios
- * Lista todos os relatórios salvos (últimos 15 dias)
+ * Lista todos os relatórios salvos (últimos 30 dias)
  */
 app.get('/api/relatorios', (req, res) => {
   const relatorios = db.prepare(`
@@ -376,8 +563,218 @@ app.post('/api/relatorios/gerar', limiteEscrita, (req, res) => {
 });
 
 /**
+ * GET /api/relatorio/csv
+ * Exporta o relatório de HOJE como CSV (atalho)
+ */
+app.get('/api/relatorio/csv', (req, res) => {
+  const data = getDataHoje();
+  
+  // Busca respostas do dia
+  const respostas = db.prepare(`
+    SELECT p.id, p.nome, p.ordem, r.resposta
+    FROM respostas_dia r
+    JOIN passageiros p ON p.id = r.passageiro_id
+    WHERE r.data = ?
+    ORDER BY p.ordem
+  `).all(data);
+
+  if (respostas.length === 0) {
+    return res.status(404).send('Nenhuma resposta registrada hoje.');
+  }
+
+  // Busca informação de cadeira_fixa
+  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const mapaCadeiraFixa = {};
+  passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
+
+  // Adiciona cadeira_fixa às respostas
+  const respostasComCadeiraFixa = respostas.map(r => ({
+    ...r,
+    cadeira_fixa: mapaCadeiraFixa[r.id] || 0
+  }));
+
+  // Calcula assentos do dia
+  const { emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeiraFixa);
+
+  // Separa por tipo de resposta
+  const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
+  const soVou = respostas.filter(r => r.resposta === 'so_vou').map(r => r.nome);
+  const soVolto = respostas.filter(r => r.resposta === 'so_volto').map(r => r.nome);
+
+  const totalPassageiros = respostas.length;
+  const maxLinhas = Math.max(vouEVolto.length, soVou.length, soVolto.length);
+
+  let csv = `Relatório de Presença - ${data}\n`;
+  csv += `Total de passageiros: ${totalPassageiros}\n\n`;
+  csv += 'Vai e Volta;Só Vai;Só Volta\n';
+
+  for (let i = 0; i < maxLinhas; i++) {
+    const col1 = vouEVolto[i] || '';
+    const col2 = soVou[i] || '';
+    const col3 = soVolto[i] || '';
+    csv += `${col1};${col2};${col3}\n`;
+  }
+
+  // Seção: Em Pé
+  if (emPe.length > 0) {
+    csv += `\nEm Pé (${emPe.length} pessoa${emPe.length > 1 ? 's' : ''})\n`;
+    emPe.forEach((p, i) => {
+      csv += `${i + 1}. ${p.nome}\n`;
+    });
+  }
+
+  // Seção: Bancos Traseiros
+  if (bancosTraseiros.length > 0) {
+    csv += `\nBancos Traseiros (${bancosTraseiros.length})\n`;
+    bancosTraseiros.forEach((p, i) => {
+      csv += `${i + 1}. ${p.nome}\n`;
+    });
+  }
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="relatorio-${data}.csv"`);
+  res.send('\uFEFF' + csv);
+});
+
+/**
+ * GET /api/relatorio/pdf
+ * Exporta o relatório de HOJE como PDF (atalho)
+ */
+app.get('/api/relatorio/pdf', (req, res) => {
+  const data = getDataHoje();
+
+  // Busca respostas do dia
+  const respostas = db.prepare(`
+    SELECT p.id, p.nome, p.ordem, r.resposta
+    FROM respostas_dia r
+    JOIN passageiros p ON p.id = r.passageiro_id
+    WHERE r.data = ?
+    ORDER BY p.ordem
+  `).all(data);
+
+  if (respostas.length === 0) {
+    return res.status(404).send('Nenhuma resposta registrada hoje.');
+  }
+
+  // Busca informação de cadeira_fixa
+  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const mapaCadeiraFixa = {};
+  passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
+
+  // Adiciona cadeira_fixa às respostas
+  const respostasComCadeiraFixa = respostas.map(r => ({
+    ...r,
+    cadeira_fixa: mapaCadeiraFixa[r.id] || 0
+  }));
+
+  // Calcula assentos do dia
+  const { sentados, emPe, bancosTraseiros } = calcularAssentosDoDia(respostasComCadeiraFixa);
+
+  // Separa por tipo
+  const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
+  const soVou = respostas.filter(r => r.resposta === 'so_vou').map(r => r.nome);
+  const soVolto = respostas.filter(r => r.resposta === 'so_volto').map(r => r.nome);
+
+  const totalPassageiros = respostas.length;
+  const maxLinhas = Math.max(vouEVolto.length, soVou.length, soVolto.length);
+
+  // Cria PDF
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="relatorio-${data}.pdf"`);
+  doc.pipe(res);
+
+  // Título
+  doc.fontSize(18).font('Helvetica-Bold').text(`Relatório de Presença`, { align: 'center' });
+  doc.fontSize(12).font('Helvetica').text(`Data: ${data}`, { align: 'center' });
+  doc.fontSize(10).text(`Total de passageiros: ${totalPassageiros}`, { align: 'center' });
+  doc.moveDown(1.5);
+
+  // Tabela de presenças
+  const startX = 40;
+  const colWidth = 175;
+  const rowHeight = 18;
+  let y = doc.y;
+
+  // Cabeçalho
+  doc.fontSize(10).font('Helvetica-Bold');
+  doc.rect(startX, y, colWidth * 3, rowHeight).fillAndStroke('#e5e7eb', '#000');
+  doc.fillColor('#000')
+     .text('Vai e Volta', startX + 5, y + 4, { width: colWidth - 10 })
+     .text('Só Vai', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
+     .text('Só Volta', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
+  y += rowHeight;
+
+  // Linhas
+  doc.font('Helvetica').fontSize(9);
+  for (let i = 0; i < maxLinhas; i++) {
+    const bg = i % 2 === 0 ? '#ffffff' : '#f9fafb';
+    doc.rect(startX, y, colWidth * 3, rowHeight).fillAndStroke(bg, '#e5e7eb');
+    doc.fillColor('#000')
+       .text(vouEVolto[i] || '', startX + 5, y + 4, { width: colWidth - 10 })
+       .text(soVou[i] || '', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
+       .text(soVolto[i] || '', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
+    y += rowHeight;
+
+    if (y > 750) {
+      doc.addPage();
+      y = 40;
+    }
+  }
+
+  // Seção: Em Pé
+  if (emPe.length > 0) {
+    y += 20;
+    if (y > 700) {
+      doc.addPage();
+      y = 40;
+    }
+    
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c81e1e')
+       .text(`EM PE (${emPe.length} pessoa${emPe.length > 1 ? 's' : ''})`, startX, y);
+    y += 20;
+    
+    doc.fontSize(9).font('Helvetica').fillColor('#000');
+    emPe.forEach((p, i) => {
+      if (y > 750) {
+        doc.addPage();
+        y = 40;
+      }
+      doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
+      y += 14;
+    });
+  }
+
+  // Seção: Bancos Traseiros
+  if (bancosTraseiros.length > 0) {
+    y += 20;
+    if (y > 700) {
+      doc.addPage();
+      y = 40;
+    }
+    
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c27803')
+       .text(`BANCOS TRASEIROS (${bancosTraseiros.length})`, startX, y);
+    y += 20;
+    
+    doc.fontSize(9).font('Helvetica').fillColor('#000');
+    bancosTraseiros.forEach((p, i) => {
+      if (y > 750) {
+        doc.addPage();
+        y = 40;
+      }
+      doc.text(`${i + 1}. ${p.nome}`, startX + 10, y);
+      y += 14;
+    });
+  }
+
+  doc.end();
+});
+
+/**
  * GET /api/relatorios/:data/csv
- * Exporta o relatório de uma data como CSV
+ * Exporta o relatório de uma data como CSV (formato 3 colunas)
  */
 app.get('/api/relatorios/:data/csv', (req, res) => {
   const { data } = req.params;
@@ -389,37 +786,45 @@ app.get('/api/relatorios/:data/csv', (req, res) => {
   const dados = JSON.parse(relatorio.dados_json);
   const linhas = [];
 
-  // Cabeçalho do relatório
+  // Cabeçalho com contagem
   linhas.push(`"Relatório do Ônibus - ${data}"`);
-  linhas.push(`"Total de Passageiros","${relatorio.total_passageiros}"`);
-  linhas.push(`"Vou e Volto","${relatorio.total_vou_e_volto}"`);
-  linhas.push(`"Só Vou","${relatorio.total_so_vou}"`);
-  linhas.push(`"Só Volto","${relatorio.total_so_volto}"`);
-  linhas.push(`"Total Sentados","${relatorio.total_sentados}"`);
-  linhas.push(`"Total em Pé","${relatorio.total_em_pe}"`);
+  linhas.push(`"Total de pessoas no dia:","${relatorio.total_passageiros}"`);
+  linhas.push(`"Vou e Volto:","${relatorio.total_vou_e_volto}","Só Vou:","${relatorio.total_so_vou}","Só Volto:","${relatorio.total_so_volto}"`);
   linhas.push('');
 
-  // Lista completa de passageiros do dia
-  linhas.push('"#","Nome","Situação","Resposta"');
-  let contador = 1;
+  // Separa por tipo de resposta
+  const vouEVolto = dados.passageiros.filter(p => p.resposta === 'vou_e_volto').map(p => p.nome);
+  const soVou = dados.passageiros.filter(p => p.resposta === 'so_vou').map(p => p.nome);
+  const soVolto = dados.passageiros.filter(p => p.resposta === 'so_volto').map(p => p.nome);
 
-  dados.passageiros.forEach(p => {
-    const sentado = dados.sentados.find(s => s.id === p.id);
-    const emPe = dados.emPe.find(e => e.id === p.id);
-    const traseiro = dados.bancosTraseiros.find(t => t.id === p.id);
+  // Encontra o maior número de linhas
+  const maxLinhas = Math.max(vouEVolto.length, soVou.length, soVolto.length);
 
-    let situacao = 'Sentado';
-    if (emPe) situacao = 'Em Pé';
-    if (traseiro) situacao = 'Banco Traseiro';
+  // Cabeçalho da tabela de 3 colunas
+  linhas.push('"Vai e volta:","Só vai:","Só volta:"');
 
-    const respostaLabel = {
-      vou_e_volto: 'Vou e Volto',
-      so_vou: 'Só Vou',
-      so_volto: 'Só Volto'
-    }[p.resposta] || p.resposta;
+  // Preenche as linhas
+  for (let i = 0; i < maxLinhas; i++) {
+    const col1 = vouEVolto[i] || '';
+    const col2 = soVou[i] || '';
+    const col3 = soVolto[i] || '';
+    linhas.push(`"${col1}","${col2}","${col3}"`);
+  }
 
-    linhas.push(`"${contador++}","${p.nome}","${situacao}","${respostaLabel}"`);
-  });
+  linhas.push('');
+
+  // Seção de quem ficou em pé
+  if (dados.emPe.length > 0) {
+    linhas.push('"Passageiros em Pé:"');
+    dados.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+    linhas.push('');
+  }
+
+  // Seção dos bancos traseiros
+  if (dados.bancosTraseiros.length > 0) {
+    linhas.push('"Bancos Traseiros do Dia:"');
+    dados.bancosTraseiros.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
+  }
 
   const csvContent = linhas.join('\n');
   const filename = `relatorio-onibus-${data}.csv`;
@@ -431,7 +836,7 @@ app.get('/api/relatorios/:data/csv', (req, res) => {
 
 /**
  * GET /api/relatorios/:data/pdf
- * Exporta o relatório de uma data como PDF
+ * Exporta o relatório de uma data como PDF (formato com 3 colunas)
  */
 app.get('/api/relatorios/:data/pdf', (req, res) => {
   const { data } = req.params;
@@ -446,62 +851,101 @@ app.get('/api/relatorios/:data/pdf', (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-  const doc = new PDFDocument({ margin: 50, size: 'A4' });
+  const doc = new PDFDocument({ margin: 40, size: 'A4' });
   doc.pipe(res);
 
+  // Separa por tipo de resposta
+  const vouEVolto = dados.passageiros.filter(p => p.resposta === 'vou_e_volto').map(p => p.nome);
+  const soVou = dados.passageiros.filter(p => p.resposta === 'so_vou').map(p => p.nome);
+  const soVolto = dados.passageiros.filter(p => p.resposta === 'so_volto').map(p => p.nome);
+
   // Título
-  doc.fontSize(18).font('Helvetica-Bold').text('Relatório do Ônibus', { align: 'center' });
-  doc.fontSize(12).font('Helvetica').text(`Data: ${data}`, { align: 'center' });
-  doc.moveDown();
+  doc.fontSize(16).font('Helvetica-Bold').text('Relatório do Ônibus', { align: 'center' });
+  doc.fontSize(11).font('Helvetica').text(`Data: ${data}`, { align: 'center' });
+  doc.moveDown(0.5);
 
-  // Resumo
-  doc.fontSize(14).font('Helvetica-Bold').text('Resumo do Dia');
-  doc.fontSize(11).font('Helvetica');
-  doc.text(`Total de Passageiros: ${relatorio.total_passageiros}`);
-  doc.text(`Vou e Volto: ${relatorio.total_vou_e_volto}`);
-  doc.text(`Só Vou: ${relatorio.total_so_vou}`);
-  doc.text(`Só Volto: ${relatorio.total_so_volto}`);
-  doc.text(`Total Sentados: ${relatorio.total_sentados}`);
-  doc.text(`Total em Pé: ${relatorio.total_em_pe}`);
-  doc.moveDown();
+  // Resumo de contagem
+  doc.fontSize(12).font('Helvetica-Bold').fillColor('#1a365d')
+    .text(`Total de pessoas no dia: ${relatorio.total_passageiros}`, { align: 'center' });
+  doc.fontSize(10).font('Helvetica').fillColor('#000000')
+    .text(`Vou e Volto: ${relatorio.total_vou_e_volto}  |  Só Vou: ${relatorio.total_so_vou}  |  Só Volto: ${relatorio.total_so_volto}`, { align: 'center' });
+  doc.moveDown(1);
 
-  // Passageiros sentados
-  doc.fontSize(14).font('Helvetica-Bold').text('Passageiros Sentados');
-  doc.fontSize(11).font('Helvetica');
-  if (dados.sentados.length === 0) {
-    doc.text('Nenhum');
-  } else {
-    dados.sentados.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+  // Configuração da tabela de 3 colunas
+  const margemEsquerda = 40;
+  const larguraPagina = 515;
+  const larguraColuna = larguraPagina / 3;
+  const alturaLinha = 18;
+  const alturaCabecalho = 25;
+
+  // Cabeçalhos das colunas (fundo azul escuro)
+  const yInicio = doc.y;
+  
+  // Fundo do cabeçalho
+  doc.rect(margemEsquerda, yInicio, larguraPagina, alturaCabecalho).fill('#1a365d');
+  
+  // Texto do cabeçalho
+  doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold');
+  doc.text('Vai e volta:', margemEsquerda + 5, yInicio + 7, { width: larguraColuna - 10, align: 'center' });
+  doc.text('Só vai:', margemEsquerda + larguraColuna + 5, yInicio + 7, { width: larguraColuna - 10, align: 'center' });
+  doc.text('Só volta:', margemEsquerda + larguraColuna * 2 + 5, yInicio + 7, { width: larguraColuna - 10, align: 'center' });
+
+  // Linhas da tabela
+  doc.fillColor('#000000').fontSize(9).font('Helvetica');
+  const maxLinhas = Math.max(vouEVolto.length, soVou.length, soVolto.length);
+  
+  let yAtual = yInicio + alturaCabecalho;
+  
+  for (let i = 0; i < maxLinhas; i++) {
+    // Alterna cor de fundo
+    if (i % 2 === 0) {
+      doc.rect(margemEsquerda, yAtual, larguraPagina, alturaLinha).fill('#f7fafc');
+    } else {
+      doc.rect(margemEsquerda, yAtual, larguraPagina, alturaLinha).fill('#ffffff');
+    }
+    
+    doc.fillColor('#000000');
+    
+    // Bordas verticais
+    doc.strokeColor('#e2e8f0').lineWidth(0.5);
+    doc.moveTo(margemEsquerda + larguraColuna, yAtual).lineTo(margemEsquerda + larguraColuna, yAtual + alturaLinha).stroke();
+    doc.moveTo(margemEsquerda + larguraColuna * 2, yAtual).lineTo(margemEsquerda + larguraColuna * 2, yAtual + alturaLinha).stroke();
+    
+    // Textos
+    if (vouEVolto[i]) doc.text(vouEVolto[i], margemEsquerda + 5, yAtual + 4, { width: larguraColuna - 10 });
+    if (soVou[i]) doc.text(soVou[i], margemEsquerda + larguraColuna + 5, yAtual + 4, { width: larguraColuna - 10 });
+    if (soVolto[i]) doc.text(soVolto[i], margemEsquerda + larguraColuna * 2 + 5, yAtual + 4, { width: larguraColuna - 10 });
+    
+    yAtual += alturaLinha;
+    
+    // Nova página se necessário
+    if (yAtual > 750) {
+      doc.addPage();
+      yAtual = 40;
+    }
   }
-  doc.moveDown();
+  
+  // Borda externa da tabela
+  doc.strokeColor('#1a365d').lineWidth(1);
+  doc.rect(margemEsquerda, yInicio, larguraPagina, alturaCabecalho + (maxLinhas * alturaLinha)).stroke();
+  
+  doc.y = yAtual + 20;
 
-  // Passageiros em pé
-  doc.fontSize(14).font('Helvetica-Bold').text('Passageiros em Pé');
-  doc.fontSize(11).font('Helvetica');
-  if (dados.emPe.length === 0) {
-    doc.text('Nenhum');
-  } else {
+  // Seção: Passageiros em Pé (ao final)
+  if (dados.emPe.length > 0) {
+    doc.moveDown();
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c53030').text('Passageiros em Pé');
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
     dados.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
+    doc.moveDown();
   }
-  doc.moveDown();
 
-  // Bancos traseiros
-  doc.fontSize(14).font('Helvetica-Bold').text('Bancos Traseiros do Dia');
-  doc.fontSize(11).font('Helvetica');
-  if (dados.bancosTraseiros.length === 0) {
-    doc.text('Nenhum');
-  } else {
+  // Seção: Bancos Traseiros (ao final)
+  if (dados.bancosTraseiros.length > 0) {
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#c27803').text('Bancos Traseiros do Dia');
+    doc.fontSize(10).font('Helvetica').fillColor('#000000');
     dados.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
   }
-  doc.moveDown();
-
-  // Lista completa
-  doc.fontSize(14).font('Helvetica-Bold').text('Lista Completa de Passageiros');
-  doc.fontSize(11).font('Helvetica');
-  dados.passageiros.forEach((p, i) => {
-    const label = { vou_e_volto: 'Vou e Volto', so_vou: 'Só Vou', so_volto: 'Só Volto' }[p.resposta] || p.resposta;
-    doc.text(`${i + 1}. ${p.nome} — ${label}`);
-  });
 
   doc.end();
 });
