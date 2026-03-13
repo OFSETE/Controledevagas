@@ -216,6 +216,15 @@
       cursor: pointer;
     }
     .login-box button:hover { background: var(--cor-primaria-hover); }
+    .login-box .btn-voltar-login {
+      display: inline-block;
+      margin-top: 12px;
+      color: var(--cor-texto-suave);
+      font-size: .85rem;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .login-box .btn-voltar-login:hover { color: var(--cor-primaria); }
     .login-erro {
       color: var(--cor-perigo);
       font-size: .85rem;
@@ -355,6 +364,36 @@
       background: var(--cor-fundo);
       border-top: 1px solid var(--cor-borda);
     }
+
+    .ponteiros-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      padding: 12px 16px 16px;
+    }
+    .ponteiro-item {
+      background: var(--cor-fundo);
+      border: 1px solid var(--cor-borda);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .ponteiro-item h4 {
+      font-size: .82rem;
+      margin-bottom: 6px;
+      color: var(--cor-texto-suave);
+      text-transform: uppercase;
+      letter-spacing: .03em;
+    }
+    .ponteiro-item .nome {
+      font-size: .92rem;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .ponteiro-item .meta {
+      margin-top: 6px;
+      font-size: .74rem;
+      color: var(--cor-texto-suave);
+    }
     
     /* Modal de edição */
     .modal-editar {
@@ -407,6 +446,7 @@
     <p>Digite a senha para acessar o painel administrativo</p>
     <input type="password" id="senha-input" placeholder="Senha" maxlength="10" autocomplete="off">
     <button onclick="verificarSenha()">Entrar</button>
+    <a href="/" class="btn-voltar-login">← Voltar para o início</a>
     <p class="login-erro" id="login-erro">❌ Senha incorreta</p>
   </div>
 </div>
@@ -430,6 +470,11 @@
 </header>
 
 <div class="container">
+
+  <div class="card">
+    <div class="card-titulo">🧭 Último de Cada Ponteiro</div>
+    <div id="ponteiros-container" class="loading">Carregando ponteiros...</div>
+  </div>
 
   <!-- Card de Gerenciamento de Passageiros -->
   <div class="card">
@@ -531,6 +576,46 @@
         </table>
       </div>
     `;
+  }
+
+  async function carregarPonteirosAdmin() {
+    const container = document.getElementById('ponteiros-container');
+    container.innerHTML = '<div class="loading">Carregando...</div>';
+
+    try {
+      const resp = await fetch('/api/admin/ponteiros');
+      if (!resp.ok) {
+        container.innerHTML = '<div class="loading">Erro ao carregar ponteiros.</div>';
+        return;
+      }
+
+      const dados = await resp.json();
+      const assentosNome = dados.assentos.ultimo ? dados.assentos.ultimo.nome : 'Nenhum participante elegível';
+      const bancosNome = dados.bancosTraseiros.ultimo ? dados.bancosTraseiros.ultimo.nome : 'Nenhum participante elegível';
+      const indiceAssentos = dados.assentos.totalParticipantes
+        ? `${dados.assentos.ponteiroAtual + 1}/${dados.assentos.totalParticipantes}`
+        : '0/0';
+      const indiceBancos = dados.bancosTraseiros.totalParticipantes
+        ? `${dados.bancosTraseiros.ponteiroAtual + 1}/${dados.bancosTraseiros.totalParticipantes}`
+        : '0/0';
+
+      container.innerHTML = `
+        <div class="ponteiros-grid">
+          <div class="ponteiro-item">
+            <h4>Ponteiro de Em Pé</h4>
+            <div class="nome">${assentosNome}</div>
+            <div class="meta">Ordem ${dados.assentos.ordem} • índice atual ${indiceAssentos}</div>
+          </div>
+          <div class="ponteiro-item">
+            <h4>Ponteiro de Bancos Traseiros</h4>
+            <div class="nome">${bancosNome}</div>
+            <div class="meta">Ordem ${dados.bancosTraseiros.ordem} • índice atual ${indiceBancos}</div>
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      container.innerHTML = '<div class="loading">Erro de conexão ao carregar ponteiros.</div>';
+    }
   }
 
   // Abre o modal com o detalhe de um relatório
@@ -672,6 +757,7 @@
       const totalSentados = dados.ida.sentados.length + dados.volta.sentados.length;
       const totalEmPe = dados.ida.emPe.length + dados.volta.emPe.length;
       alert(`✅ Relatório gerado!\nPassageiros: ${dados.totalPassageiros}\nSentados (ida+volta): ${totalSentados}\nEm pé (ida+volta): ${totalEmPe}`);
+      carregarPonteirosAdmin();
       carregarRelatorios();
     } else {
       alert(`❌ Erro: ${dados.erro}`);
@@ -768,6 +854,7 @@
 
     if (resp.ok) {
       carregarPassageiros();
+      carregarPonteirosAdmin();
     } else {
       const dados = await resp.json();
       alert(`❌ Erro: ${dados.erro}`);
@@ -809,6 +896,7 @@
       alert(`✅ Nome atualizado com sucesso!`);
       fecharModalEditar();
       carregarPassageiros();
+      carregarPonteirosAdmin();
     } else {
       alert(`❌ Erro: ${dados.erro}`);
     }
@@ -847,6 +935,7 @@
       alert(`✅ Passageiro "${dados.nome}" adicionado com sucesso!`);
       input.value = '';
       carregarPassageiros();
+      carregarPonteirosAdmin();
     } else {
       alert(`❌ Erro: ${dados.erro}`);
     }
@@ -864,6 +953,7 @@
     if (resp.ok) {
       alert(`✅ Passageiro "${dados.removido}" removido com sucesso!`);
       carregarPassageiros();
+      carregarPonteirosAdmin();
     } else {
       alert(`❌ Erro: ${dados.erro}`);
     }
@@ -874,6 +964,7 @@
 
   // Inicialização
   carregarPassageiros();
+  carregarPonteirosAdmin();
   carregarRelatorios();
 </script>
 </body>

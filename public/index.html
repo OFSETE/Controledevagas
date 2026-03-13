@@ -485,6 +485,8 @@
   let respostasLocais = {};
   let passageiros = [];
   let usuarioAtual = null; // passageiro logado
+  let modalUsuarioPodeFechar = false;
+  let podeVotarAtual = true;
 
   // Chave do localStorage
   const STORAGE_KEY = 'controle_onibus_usuario';
@@ -495,6 +497,13 @@
     const [ano, mes, dia] = dataStr.split('-');
     const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
     return `${dia} de ${meses[parseInt(mes) - 1]} de ${ano}`;
+  }
+
+  function formatarHoraAtual() {
+    const agora = new Date();
+    const hora = String(agora.getHours()).padStart(2, '0');
+    const minuto = String(agora.getMinutes()).padStart(2, '0');
+    return `${hora}:${minuto}`;
   }
 
   // Exibe mensagem temporária de feedback
@@ -530,9 +539,10 @@
   }
 
   // Mostra modal de seleção de usuário
-  function mostrarModalUsuario() {
+  function mostrarModalUsuario(obrigatorio = false) {
     const modal = document.getElementById('modal-usuario');
     const lista = document.getElementById('lista-usuarios');
+    const pesquisa = document.getElementById('pesquisa-usuario');
     
     // Renderiza lista de passageiros no modal
     lista.innerHTML = passageiros.map(p => `
@@ -540,14 +550,18 @@
         ${p.ordem}. ${p.nome}
       </div>
     `).join('');
+
+    // Só permite fechar clicando fora quando já existe usuário selecionado
+    modalUsuarioPodeFechar = !obrigatorio && !!usuarioAtual;
     
     modal.classList.remove('oculto');
-    document.getElementById('pesquisa-usuario').value = '';
-    document.getElementById('pesquisa-usuario').focus();
+    pesquisa.value = '';
+    pesquisa.focus();
   }
 
   // Oculta modal de seleção
   function ocultarModalUsuario() {
+    if (!modalUsuarioPodeFechar) return;
     document.getElementById('modal-usuario').classList.add('oculto');
   }
 
@@ -558,15 +572,14 @@
     
     usuarioAtual = passageiro;
     salvarUsuario(passageiro);
-    ocultarModalUsuario();
+    modalUsuarioPodeFechar = true;
+    document.getElementById('modal-usuario').classList.add('oculto');
     atualizarInterfaceUsuario();
     mostrarToast(`✔ Olá, ${passageiro.nome}!`);
   }
 
   // Troca de usuário (clicou em "Não sou eu")
   function trocarUsuario() {
-    limparUsuario();
-    usuarioAtual = null;
     mostrarModalUsuario();
   }
 
@@ -589,6 +602,7 @@
   function atualizarInterfaceUsuario() {
     const cardUsuario = document.getElementById('usuario-card');
     const cardMinhaVotacao = document.getElementById('card-minha-votacao');
+    const cardVotacaoEncerrada = document.getElementById('card-votacao-encerrada');
     const btnTrocar = document.getElementById('btn-trocar-usuario');
     const linkAdmin = document.getElementById('link-admin');
     
@@ -597,9 +611,15 @@
       cardUsuario.style.display = 'block';
       document.getElementById('usuario-nome').textContent = usuarioAtual.nome;
       
-      // Mostra card de votação rápida
-      cardMinhaVotacao.style.display = 'block';
-      renderizarMinhaVotacao();
+      // Só mostra os botões de votação quando ainda está no horário
+      if (podeVotarAtual) {
+        cardMinhaVotacao.style.display = 'block';
+        cardVotacaoEncerrada.style.display = 'none';
+        renderizarMinhaVotacao();
+      } else {
+        cardMinhaVotacao.style.display = 'none';
+        cardVotacaoEncerrada.style.display = 'block';
+      }
       
       btnTrocar.style.display = 'block';
       
@@ -612,6 +632,7 @@
     } else {
       cardUsuario.style.display = 'none';
       cardMinhaVotacao.style.display = 'none';
+      cardVotacaoEncerrada.style.display = 'none';
       linkAdmin.style.display = 'none';
     }
   }
@@ -649,10 +670,11 @@
     const dados = await resp.json();
 
     // Atualiza data no cabeçalho
-    document.getElementById('data-hoje').textContent = formatarData(dados.data);
+    document.getElementById('data-hoje').textContent = `${formatarData(dados.data)} ${formatarHoraAtual()}`;
 
     // Atualiza mapa de respostas
     respostasLocais = dados.respostas || {};
+    podeVotarAtual = !!dados.podeVotar;
 
     // Atualiza cada linha de passageiro (incluindo a votação rápida)
     passageiros.forEach(p => {
@@ -751,7 +773,7 @@
     const cardMinhaVotacao = document.getElementById('card-minha-votacao');
     const cardVotacaoEncerrada = document.getElementById('card-votacao-encerrada');
     
-    if (dados.podeVotar) {
+    if (podeVotarAtual) {
       // Votação aberta - mostra card de votação se usuário logado
       if (usuarioAtual) {
         cardMinhaVotacao.style.display = 'block';
@@ -847,16 +869,23 @@
       } else {
         // Usuário foi removido, limpa e mostra modal
         limparUsuario();
-        mostrarModalUsuario();
+        mostrarModalUsuario(true);
       }
     } else {
       // Primeira vez, mostra modal
-      mostrarModalUsuario();
+      mostrarModalUsuario(true);
     }
 
     // Listener para pesquisa de usuário
     document.getElementById('pesquisa-usuario').addEventListener('input', (e) => {
       filtrarUsuarios(e.target.value);
+    });
+
+    // Fecha o modal ao clicar fora apenas quando houver usuário ativo
+    document.getElementById('modal-usuario').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-usuario') {
+        ocultarModalUsuario();
+      }
     });
 
     // Atualiza automaticamente a cada 30 segundos

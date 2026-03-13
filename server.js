@@ -527,6 +527,53 @@ app.post('/api/admin/login', limiteEscrita, (req, res) => {
 });
 
 /**
+ * GET /api/admin/ponteiros
+ * Retorna o estado dos ponteiros e o último passageiro de cada rodízio.
+ */
+app.get('/api/admin/ponteiros', (req, res) => {
+  const ponteiroAssentosRaw = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get()?.ponteiro || 0;
+  const ponteiroBancosRaw = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get()?.ponteiro || 0;
+
+  const participantesRodizio = db.prepare(`
+    SELECT id, nome
+    FROM passageiros
+    WHERE cadeira_fixa != 1
+  `).all();
+
+  const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
+  const participantesZA = [...participantesRodizio].sort((a, b) => b.nome.localeCompare(a.nome));
+
+  function montarInfoPonteiro(listaOrdenada, ponteiroRaw, ordem) {
+    const total = listaOrdenada.length;
+    if (total === 0) {
+      return {
+        ordem,
+        totalParticipantes: 0,
+        ponteiroAtual: 0,
+        ultimo: null,
+        proximo: null
+      };
+    }
+
+    const ponteiroAtual = ((ponteiroRaw % total) + total) % total;
+    const idxUltimo = (ponteiroAtual - 1 + total) % total;
+
+    return {
+      ordem,
+      totalParticipantes: total,
+      ponteiroAtual,
+      ultimo: listaOrdenada[idxUltimo],
+      proximo: listaOrdenada[ponteiroAtual]
+    };
+  }
+
+  res.json({
+    assentos: montarInfoPonteiro(participantesAZ, ponteiroAssentosRaw, 'A-Z'),
+    bancosTraseiros: montarInfoPonteiro(participantesZA, ponteiroBancosRaw, 'Z-A')
+  });
+});
+
+/**
  * GET /api/passageiros
  * Retorna lista de todos os passageiros em ordem alfabética
  */
