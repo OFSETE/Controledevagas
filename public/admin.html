@@ -167,8 +167,27 @@
     .vazio { color: var(--cor-texto-suave); font-size: .85rem; font-style: italic; }
     .loading { padding: 30px; text-align: center; color: var(--cor-texto-suave); font-size: .9rem; }
 
-    .voltar { display: block; text-align: center; padding: 12px; color: var(--cor-texto-suave); font-size: .8rem; text-decoration: none; }
-    .voltar:hover { color: var(--cor-primaria); }
+    .btn-voltar-topo {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #fff;
+      text-decoration: none;
+      font-size: .85rem;
+      font-weight: 600;
+      opacity: 0.9;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      transition: background 0.2s, opacity 0.2s;
+    }
+    .btn-voltar-topo:hover {
+      background: rgba(255, 255, 255, 0.15);
+      opacity: 1;
+    }
 
     /* Tela de login */
     .login-overlay {
@@ -464,12 +483,53 @@
   </div>
 </div>
 
-<header>
+<!-- Modal de edição de ponteiro -->
+<div class="modal-editar" id="modal-ponteiro">
+  <div class="modal-editar-content">
+    <h3 id="modal-ponteiro-titulo">✏️ Editar Ponteiro</h3>
+    <p style="font-size: 0.85rem; color: var(--cor-texto-suave); margin-bottom: 12px;">
+      Selecione a pessoa que foi a <strong>última</strong> na lista. O sistema continuará a partir do próximo.
+    </p>
+    <select id="select-ultimo-passageiro" style="width: 100%; padding: 12px; border: 2px solid var(--cor-borda); border-radius: 6px; font-size: .95rem; margin-bottom: 16px;">
+    </select>
+    <div class="modal-editar-btns">
+      <button class="btn btn-primario" onclick="fecharModalPonteiro()">Cancelar</button>
+      <button class="btn btn-sucesso" onclick="salvarPonteiro()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<header style="position: relative;">
+  <a href="/" class="btn-voltar-topo">← Voltar</a>
   <h1>⚙️ Painel Administrativo</h1>
   <p>Gerenciamento do Sistema</p>
 </header>
 
 <div class="container">
+
+  <!-- Card de Configurações -->
+  <div class="card">
+    <div class="card-titulo">⚙️ Configurações do Sistema</div>
+    <div style="padding: 16px;">
+      <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+          <label for="input-limite-sentados" style="font-size: .85rem; font-weight: 600; display: block; margin-bottom: 6px;">Máximo de Vagas/Assentos:</label>
+          <input type="number" id="input-limite-sentados" min="1" style="padding: 8px; width: 120px; border: 2px solid var(--cor-borda); border-radius: 6px;" />
+        </div>
+        <div>
+          <label style="font-size: .85rem; font-weight: 600; display: block; margin-bottom: 6px;">Bancos Traseiros:</label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: .85rem; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+              <input type="checkbox" id="checkbox-bancos-traseiros" onchange="toggleBancosTraseiros()" /> Ativar
+            </label>
+            <input type="number" id="input-bancos-traseiros" min="1" style="padding: 8px; width: 80px; border: 2px solid var(--cor-borda); border-radius: 6px;" />
+          </div>
+        </div>
+        <button class="btn btn-sucesso" onclick="salvarConfiguracao()" style="height: 38px;">💾 Salvar</button>
+      </div>
+      <p style="font-size: .75rem; color: var(--cor-texto-suave); margin-top: 12px;">Define quantas pessoas podem ir sentadas e a quantidade de bancos traseiros (desative se não quiser usar essa função).</p>
+    </div>
+  </div>
 
   <div class="card">
     <div class="card-titulo">🧭 Último de Cada Ponteiro</div>
@@ -502,8 +562,6 @@
     </div>
     <div id="tabela-container" class="loading">Carregando relatórios...</div>
   </div>
-
-  <a href="/" class="voltar">← Voltar para o Controle de Presença</a>
 
 </div>
 
@@ -602,12 +660,18 @@
       container.innerHTML = `
         <div class="ponteiros-grid">
           <div class="ponteiro-item">
-            <h4>Ponteiro de Em Pé</h4>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <h4>Ponteiro de Em Pé</h4>
+              <button class="btn-editar" onclick="abrirModalPonteiro('assentos')" title="Definir última pessoa">✏️</button>
+            </div>
             <div class="nome">${assentosNome}</div>
             <div class="meta">Ordem ${dados.assentos.ordem} • índice atual ${indiceAssentos}</div>
           </div>
           <div class="ponteiro-item">
-            <h4>Ponteiro de Bancos Traseiros</h4>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <h4>Ponteiro de Bancos Traseiros</h4>
+              <button class="btn-editar" onclick="abrirModalPonteiro('bancosTraseiros')" title="Definir última pessoa">✏️</button>
+            </div>
             <div class="nome">${bancosNome}</div>
             <div class="meta">Ordem ${dados.bancosTraseiros.ordem} • índice atual ${indiceBancos}</div>
           </div>
@@ -615,6 +679,76 @@
       `;
     } catch (e) {
       container.innerHTML = '<div class="loading">Erro de conexão ao carregar ponteiros.</div>';
+    }
+  }
+
+  // Carrega as configurações do sistema
+  async function carregarConfiguracoes() {
+    try {
+      const resp = await fetch('/api/admin/configuracoes');
+      if (resp.ok) {
+        const dados = await resp.json();
+        document.getElementById('input-limite-sentados').value = dados.limite_sentados;
+        
+        const inputBancos = document.getElementById('input-bancos-traseiros');
+        const checkboxBancos = document.getElementById('checkbox-bancos-traseiros');
+        
+        if (dados.bancos_traseiros > 0) {
+          checkboxBancos.checked = true;
+          inputBancos.value = dados.bancos_traseiros;
+          inputBancos.disabled = false;
+        } else {
+          checkboxBancos.checked = false;
+          inputBancos.value = 5; // valor padrão visual
+          inputBancos.disabled = true;
+        }
+      }
+    } catch (e) {
+      console.error('Erro ao carregar configurações', e);
+    }
+  }
+
+  function toggleBancosTraseiros() {
+    const isChecked = document.getElementById('checkbox-bancos-traseiros').checked;
+    document.getElementById('input-bancos-traseiros').disabled = !isChecked;
+  }
+
+  // Salva as configurações do sistema
+  async function salvarConfiguracao() {
+    const limiteStr = document.getElementById('input-limite-sentados').value;
+    const limite = parseInt(limiteStr);
+    
+    if (isNaN(limite) || limite < 1) {
+      alert('Por favor, informe um limite de vagas válido maior que 0.');
+      return;
+    }
+
+    const checkboxBancos = document.getElementById('checkbox-bancos-traseiros').checked;
+    let bancosTraseiros = 0;
+    
+    if (checkboxBancos) {
+      bancosTraseiros = parseInt(document.getElementById('input-bancos-traseiros').value);
+      if (isNaN(bancosTraseiros) || bancosTraseiros < 1) {
+        alert('Por favor, informe uma quantidade válida de bancos traseiros.');
+        return;
+      }
+    }
+
+    try {
+      const resp = await fetch('/api/admin/configuracoes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limite_sentados: limite, bancos_traseiros: bancosTraseiros })
+      });
+      
+      if (resp.ok) {
+        alert('Configurações salvas com sucesso!');
+      } else {
+        const dados = await resp.json();
+        alert(`Erro: ${dados.erro}`);
+      }
+    } catch (e) {
+      alert('Erro de conexão ao salvar configurações.');
     }
   }
 
@@ -912,6 +1046,71 @@
     if (e.target.id === 'modal-editar') fecharModalEditar();
   });
 
+  // Edição de ponteiros manuais
+  let tipoPonteiroAtual = '';
+
+  async function abrirModalPonteiro(tipo) {
+    tipoPonteiroAtual = tipo;
+    const titulo = tipo === 'assentos' ? 'Ponteiro de Em Pé' : 'Ponteiro de Bancos Traseiros';
+    document.getElementById('modal-ponteiro-titulo').innerText = `✏️ Editar ${titulo}`;
+    
+    const select = document.getElementById('select-ultimo-passageiro');
+    select.innerHTML = '<option value="">Carregando...</option>';
+    document.getElementById('modal-ponteiro').classList.add('aberto');
+
+    try {
+      const resp = await fetch('/api/passageiros');
+      const passageiros = await resp.json();
+      const elegiveis = passageiros.filter(p => p.cadeira_fixa !== 1);
+      
+      if (tipo === 'assentos') {
+        elegiveis.sort((a, b) => a.nome.localeCompare(b.nome));
+      } else {
+        elegiveis.sort((a, b) => b.nome.localeCompare(a.nome));
+      }
+
+      select.innerHTML = elegiveis.map(p => `<option value="${p.id}">${p.nome}</option>`).join('');
+    } catch (e) {
+      select.innerHTML = '<option value="">Erro ao carregar</option>';
+    }
+  }
+
+  function fecharModalPonteiro() {
+    document.getElementById('modal-ponteiro').classList.remove('aberto');
+  }
+
+  async function salvarPonteiro() {
+    const passageiroId = document.getElementById('select-ultimo-passageiro').value;
+    if (!passageiroId) {
+      alert('Selecione um passageiro');
+      return;
+    }
+
+    try {
+      const resp = await fetch(`/api/admin/ponteiros/${tipoPonteiroAtual}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passageiro_id: passageiroId })
+      });
+      const dados = await resp.json();
+      
+      if (resp.ok) {
+        alert('Ponteiro atualizado com sucesso!');
+        fecharModalPonteiro();
+        carregarPonteirosAdmin();
+      } else {
+        alert(`Erro: ${dados.erro}`);
+      }
+    } catch (e) {
+      alert('Erro de conexão ao salvar ponteiro.');
+    }
+  }
+
+  // Fecha modal ponteiro ao clicar fora
+  document.getElementById('modal-ponteiro').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-ponteiro') fecharModalPonteiro();
+  });
+
   // Adiciona novo passageiro
   async function adicionarPassageiro() {
     const input = document.getElementById('novo-passageiro');
@@ -963,6 +1162,7 @@
   document.getElementById('senha-input').focus();
 
   // Inicialização
+  carregarConfiguracoes();
   carregarPassageiros();
   carregarPonteirosAdmin();
   carregarRelatorios();

@@ -16,8 +16,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configurações do sistema (via .env ou valores padrão)
-const LIMITE_SENTADOS = parseInt(process.env.LIMITE_SENTADOS) || 23;
-const BANCOS_TRASEIROS = parseInt(process.env.BANCOS_TRASEIROS) || 5;
+// LIMITE_SENTADOS agora é buscado dinamicamente do banco de dados através da função getLimiteSentados()
+// BANCOS_TRASEIROS agora é buscado dinamicamente do banco de dados através da função getBancosTraseiros()
 const LIMITE_PARA_BANCOS_TRASEIROS = parseInt(process.env.LIMITE_PARA_BANCOS_TRASEIROS) || 18;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '147258';
 
@@ -65,6 +65,30 @@ function getDataHoje() {
 }
 
 /**
+ * Retorna o limite de pessoas sentadas definido nas configurações do banco.
+ */
+function getLimiteSentados() {
+  try {
+    const row = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'limite_sentados'").get();
+    return parseInt(row?.valor) || 23;
+  } catch (e) {
+    return 23; // fallback caso a tabela ainda não exista
+  }
+}
+
+/**
+ * Retorna a quantidade de bancos traseiros definida nas configurações do banco.
+ */
+function getBancosTraseiros() {
+  try {
+    const row = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'bancos_traseiros'").get();
+    return row ? parseInt(row.valor) : 5;
+  } catch (e) {
+    return 5; // fallback caso a tabela ainda não exista
+  }
+}
+
+/**
  * Verifica se ainda é possível votar (antes das 15:30)
  */
 function podeVotar() {
@@ -97,7 +121,8 @@ function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
 
   const totalPresentes = presentes.length;
-  const lugaresDisponiveis = LIMITE_SENTADOS - cadeirasFixas.length;
+  const limiteSentados = getLimiteSentados();
+  const lugaresDisponiveis = limiteSentados - cadeirasFixas.length;
 
   // Caso todos caibam sentados
   if (participantesRodizio.length <= lugaresDisponiveis) {
@@ -222,7 +247,8 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
   const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
 
   const totalPresentes = presentes.length;
-  const lugaresDisponiveis = LIMITE_SENTADOS - cadeirasFixas.length;
+  const limiteSentados = getLimiteSentados();
+  const lugaresDisponiveis = limiteSentados - cadeirasFixas.length;
 
   // Caso todos caibam sentados
   if (participantesRodizio.length <= lugaresDisponiveis) {
@@ -309,9 +335,11 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
 function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, excluir = [], offset = 0) {
   if (sentados.length === 0) return [];
   
+  const bancosTraseiros = getBancosTraseiros();
+  
   // Quantidade de bancos traseiros = passageiros acima de 18 (máximo 5)
   const bancosNecessarios = Math.max(0, totalPresentes - LIMITE_PARA_BANCOS_TRASEIROS);
-  const quantidade = Math.min(BANCOS_TRASEIROS, bancosNecessarios, sentados.length);
+  const quantidade = Math.min(bancosTraseiros, bancosNecessarios, sentados.length);
   
   if (quantidade === 0) return [];
   
@@ -527,6 +555,47 @@ app.post('/api/admin/login', limiteEscrita, (req, res) => {
 });
 
 /**
+ * GET /api/admin/configuracoes
+ * Retorna as configurações do sistema
+ */
+app.get('/api/admin/configuracoes', (req, res) => {
+  const limiteSentados = getLimiteSentados();
+  const bancosTraseiros = getBancosTraseiros();
+  res.json({ limite_sentados: limiteSentados, bancos_traseiros: bancosTraseiros });
+});
+
+/**
+ * PUT /api/admin/configuracoes
+ * Atualiza configurações do sistema
+ * Body: { limite_sentados, bancos_traseiros }
+ */
+app.put('/api/admin/configuracoes', limiteEscrita, (req, res) => {
+  const { limite_sentados, bancos_traseiros } = req.body;
+  
+  if (limite_sentados !== undefined) {
+    const valorLimite = parseInt(limite_sentados);
+    if (!isNaN(valorLimite) && valorLimite >= 1) {
+      db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('limite_sentados', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(valorLimite.toString());
+    }
+  }
+
+  if (bancos_traseiros !== undefined) {
+    const valorBancos = parseInt(bancos_traseiros);
+    if (!isNaN(valorBancos) && valorBancos >= 0) {
+      db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('bancos_traseiros', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(valorBancos.toString());
+    }
+  }
+  
+  res.json({ 
+    sucesso: true, 
+    configuracoes: { 
+      limite_sentados: getLimiteSentados(),
+      bancos_traseiros: getBancosTraseiros()
+    } 
+  });
+});
+
+/**
  * GET /api/admin/ponteiros
  * Retorna o estado dos ponteiros e o último passageiro de cada rodízio.
  */
@@ -571,6 +640,62 @@ app.get('/api/admin/ponteiros', (req, res) => {
     assentos: montarInfoPonteiro(participantesAZ, ponteiroAssentosRaw, 'A-Z'),
     bancosTraseiros: montarInfoPonteiro(participantesZA, ponteiroBancosRaw, 'Z-A')
   });
+});
+
+/**
+ * PUT /api/admin/ponteiros/:tipo
+ * Define manualmente a última pessoa de um rodízio
+ * Params: tipo ('assentos' ou 'bancosTraseiros')
+ * Body: { passageiro_id }
+ */
+app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
+  const { tipo } = req.params;
+  const { passageiro_id } = req.body;
+
+  if (tipo !== 'assentos' && tipo !== 'bancosTraseiros') {
+    return res.status(400).json({ erro: 'Tipo de ponteiro inválido' });
+  }
+
+  // Verifica se o passageiro existe e não tem cadeira fixa
+  const passageiro = db.prepare('SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?').get(passageiro_id);
+  if (!passageiro) {
+    return res.status(404).json({ erro: 'Passageiro não encontrado' });
+  }
+  if (passageiro.cadeira_fixa === 1) {
+    return res.status(400).json({ erro: 'Passageiro com cadeira fixa não participa do rodízio' });
+  }
+
+  // Busca lista de participantes do rodízio
+  const participantesRodizio = db.prepare('SELECT id, nome FROM passageiros WHERE cadeira_fixa != 1').all();
+  if (participantesRodizio.length === 0) {
+    return res.status(400).json({ erro: 'Nenhum participante no rodízio' });
+  }
+
+  let index = -1;
+  let tabela = '';
+  
+  if (tipo === 'assentos') {
+    const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
+    index = participantesAZ.findIndex(p => p.id === parseInt(passageiro_id));
+    tabela = 'rotacao_assentos';
+  } else {
+    const participantesZA = [...participantesRodizio].sort((a, b) => b.nome.localeCompare(a.nome));
+    index = participantesZA.findIndex(p => p.id === parseInt(passageiro_id));
+    tabela = 'rotacao_bancos_traseiros';
+  }
+
+  if (index === -1) {
+    return res.status(500).json({ erro: 'Passageiro não encontrado na lista ordenada' });
+  }
+
+  // O ponteiro aponta para o PRÓXIMO. Se o passageiro escolhido foi o ÚLTIMO, o próximo é (index + 1)
+  const novoPonteiro = (index + 1) % participantesRodizio.length;
+
+  // Atualiza no banco (atualiza tanto ida quanto volta)
+  db.prepare(`UPDATE ${tabela} SET ponteiro = ? WHERE id = 1`).run(novoPonteiro);
+  db.prepare(`UPDATE ${tabela} SET ponteiro = ? WHERE id = 2`).run(novoPonteiro);
+
+  res.json({ sucesso: true, novoPonteiro, ultimoPassageiro: passageiro.nome });
 });
 
 /**

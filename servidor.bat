@@ -12,7 +12,7 @@ echo ║  [1] Iniciar Servidor                      ║
 echo ║  [2] Parar Servidor                        ║
 echo ║  [3] Reiniciar Servidor                    ║
 echo ║  [4] Abrir no Navegador                    ║
-echo ║  [5] Sair                                  ║
+echo ║  [0] Sair                                  ║
 echo ║                                            ║
 echo ╚════════════════════════════════════════════╝
 echo.
@@ -22,7 +22,7 @@ if "%opcao%"=="1" goto iniciar
 if "%opcao%"=="2" goto parar
 if "%opcao%"=="3" goto reiniciar
 if "%opcao%"=="4" goto abrir
-if "%opcao%"=="5" goto sair
+if "%opcao%"=="0" goto sair
 
 echo.
 echo Opcao invalida!

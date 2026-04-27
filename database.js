@@ -6,8 +6,8 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-// Caminho do arquivo do banco de dados
-const DB_PATH = path.join(__dirname, 'onibus.db');
+// Caminho do arquivo do banco de dados (permite injetar por variável de ambiente para volumes no Fly.io)
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'onibus.db');
 
 // Conecta (ou cria) o banco de dados
 const db = new Database(DB_PATH);
@@ -88,6 +88,20 @@ function initDatabase() {
     INSERT OR IGNORE INTO rotacao_assentos (id, ponteiro) VALUES (2, 0);
     INSERT OR IGNORE INTO rotacao_bancos_traseiros (id, ponteiro) VALUES (1, 0);
     INSERT OR IGNORE INTO rotacao_bancos_traseiros (id, ponteiro) VALUES (2, 0);
+  `);
+
+  // Tabela de configurações gerais do sistema
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS configuracoes (
+      chave TEXT PRIMARY KEY,
+      valor TEXT NOT NULL
+    )
+  `);
+
+  // Inicializa configurações padrão
+  db.exec(`
+    INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('limite_sentados', '23');
+    INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('bancos_traseiros', '5');
   `);
 
   // Popula a lista de passageiros se ainda não existir
