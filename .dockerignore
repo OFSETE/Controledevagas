@@ -1,0 +1,8 @@
+node_modules
+.git
+.env
+onibus.db
+onibus.db-journal
+onibus.db-shm
+onibus.db-wal
+servidor.bat
