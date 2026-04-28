@@ -16,8 +16,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Configurações do sistema (via .env ou valores padrão)
-// LIMITE_SENTADOS agora é buscado dinamicamente do banco de dados através da função getLimiteSentados()
-// BANCOS_TRASEIROS agora é buscado dinamicamente do banco de dados através da função getBancosTraseiros()
+// LIMITE_SENTADOS agora é buscado dinamicamente do banco de dados através da função await getLimiteSentados()
+// BANCOS_TRASEIROS agora é buscado dinamicamente do banco de dados através da função await getBancosTraseiros()
 const LIMITE_PARA_BANCOS_TRASEIROS = parseInt(process.env.LIMITE_PARA_BANCOS_TRASEIROS) || 18;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '147258';
 
@@ -67,9 +67,9 @@ function getDataHoje() {
 /**
  * Retorna o limite de pessoas sentadas definido nas configurações do banco.
  */
-function getLimiteSentados() {
+async function getLimiteSentados() {
   try {
-    const row = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'limite_sentados'").get();
+    const row = (await db.execute("SELECT valor FROM configuracoes WHERE chave = 'limite_sentados'")).rows[0];
     return parseInt(row?.valor) || 23;
   } catch (e) {
     return 23; // fallback caso a tabela ainda não exista
@@ -79,9 +79,9 @@ function getLimiteSentados() {
 /**
  * Retorna a quantidade de bancos traseiros definida nas configurações do banco.
  */
-function getBancosTraseiros() {
+async function getBancosTraseiros() {
   try {
-    const row = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'bancos_traseiros'").get();
+    const row = (await db.execute("SELECT valor FROM configuracoes WHERE chave = 'bancos_traseiros'")).rows[0];
     return row ? parseInt(row.valor) : 5;
   } catch (e) {
     return 5; // fallback caso a tabela ainda não exista
@@ -111,7 +111,7 @@ function podeVotar() {
  * @param {Array} presentes - Lista de passageiros presentes
  * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
+async function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   if (presentes.length === 0) {
     return { sentados: [], emPe: [], bancosTraseiros: [], cadeirasFixas: [] };
   }
@@ -121,7 +121,7 @@ function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
 
   const totalPresentes = presentes.length;
-  const limiteSentados = getLimiteSentados();
+  const limiteSentados = await getLimiteSentados();
   const lugaresDisponiveis = limiteSentados - cadeirasFixas.length;
 
   // Caso todos caibam sentados
@@ -132,15 +132,15 @@ function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
     
     // Bancos traseiros só se > 18 pessoas (excluindo cadeiras fixas do rodízio)
     if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
-      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
-      bancosTraseiros = calcularBancosTraseiros(participantesRodizio, ponteiroBancos, totalPresentes);
+      const ponteiroBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
+      bancosTraseiros = await calcularBancosTraseiros(participantesRodizio, ponteiroBancos, totalPresentes);
     }
     return { sentados, emPe: [], bancosTraseiros, cadeirasFixas };
   }
 
   // Busca ponteiros de rodízio (usando tipoRodizio: 1=ida, 2=volta)
-  const ponteiroEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
-  const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroEmPe = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_assentos WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
+  const ponteiroBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
 
   // Ordena participantes A-Z para rodízio de em pé
   const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
@@ -164,7 +164,7 @@ function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   const sentados = [...cadeirasFixas, ...sentadosRodizio];
 
   // Bancos traseiros só para quem participa do rodízio (sentados, não em pé)
-  const bancosTraseiros = calcularBancosTraseiros(sentadosRodizio, ponteiroBancos, totalPresentes);
+  const bancosTraseiros = await calcularBancosTraseiros(sentadosRodizio, ponteiroBancos, totalPresentes);
 
   return { sentados, emPe, bancosTraseiros, cadeirasFixas };
 }
@@ -181,7 +181,7 @@ function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
  * @param {Array} respostasComCadeiraFixa - Lista de respostas com informação de cadeira_fixa
  * @returns {Object} { ida: {...}, volta: {...} }
  */
-function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
+async function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
   // Filtra quem vai na IDA: vou_e_volto ou so_vou
   const presentesIda = respostasComCadeiraFixa.filter(r => 
     r.resposta === 'vou_e_volto' || r.resposta === 'so_vou'
@@ -193,7 +193,7 @@ function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
   );
 
   // ========== CÁLCULO DA IDA ==========
-  const resultadoIda = calcularAssentosTrechoComPonteiro(
+  const resultadoIda = await calcularAssentosTrechoComPonteiro(
     presentesIda, 
     1, 
     [], // Sem exclusões de em pé
@@ -206,7 +206,7 @@ function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
   // Quem ficou em pé na IDA deve ser pulado na VOLTA
   // Quem foi para banco traseiro na IDA deve ser pulado na VOLTA
   // Continua do ponteiro onde a ida parou
-  const resultadoVolta = calcularAssentosTrechoComPonteiro(
+  const resultadoVolta = await calcularAssentosTrechoComPonteiro(
     presentesVolta, 
     1, // Usa o MESMO ponteiro (ida)
     resultadoIda.emPe, // Pula quem já ficou em pé na ida
@@ -237,7 +237,7 @@ function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
  * @param {Array} excluirDoRodizioBancos - Passageiros que devem ser pulados do rodízio de bancos
  * @param {number} offsetPonteiroBancos - Quanto avançar além do ponteiro de bancos
  */
-function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodizioEmPe, offsetPonteiroEmPe, excluirDoRodizioBancos = [], offsetPonteiroBancos = 0) {
+async function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodizioEmPe, offsetPonteiroEmPe, excluirDoRodizioBancos = [], offsetPonteiroBancos = 0) {
   if (presentes.length === 0) {
     return { sentados: [], emPe: [], bancosTraseiros: [], cadeirasFixas: [] };
   }
@@ -247,7 +247,7 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
   const participantesRodizio = presentes.filter(p => p.cadeira_fixa !== 1);
 
   const totalPresentes = presentes.length;
-  const limiteSentados = getLimiteSentados();
+  const limiteSentados = await getLimiteSentados();
   const lugaresDisponiveis = limiteSentados - cadeirasFixas.length;
 
   // Caso todos caibam sentados
@@ -256,8 +256,8 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
     let bancosTraseiros = [];
     
     if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
-      const ponteiroBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
-      bancosTraseiros = calcularBancosTraseirosComExclusao(
+      const ponteiroBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
+      bancosTraseiros = await calcularBancosTraseirosComExclusao(
         participantesRodizio, 
         ponteiroBancos, 
         totalPresentes, 
@@ -275,8 +275,8 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
   const quantidadeEmPe = participantesRodizio.length - lugaresDisponiveis;
 
   // Busca ponteiro de rodízio
-  const ponteiroBaseEmPe = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
-  const ponteiroBaseBancos = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroBaseEmPe = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_assentos WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
+  const ponteiroBaseBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
 
   // Ordena TODOS os participantes A-Z (lista completa para manter ordem consistente)
   const todosSortedAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
@@ -310,7 +310,7 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
   const sentados = [...cadeirasFixas, ...sentadosRodizio];
 
   // Bancos traseiros só para quem participa do rodízio (sentados, não em pé)
-  const bancosTraseiros = calcularBancosTraseirosComExclusao(
+  const bancosTraseiros = await calcularBancosTraseirosComExclusao(
     sentadosRodizio, 
     ponteiroBaseBancos, 
     totalPresentes, 
@@ -332,10 +332,10 @@ function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluirDoRodi
  * @param {Array} excluir - Passageiros que devem ser pulados (já foram na ida)
  * @param {number} offset - Quanto avançar além do ponteiro (para volta continuar da ida)
  */
-function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, excluir = [], offset = 0) {
+async function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, excluir = [], offset = 0) {
   if (sentados.length === 0) return [];
   
-  const bancosTraseiros = getBancosTraseiros();
+  const bancosTraseiros = await getBancosTraseiros();
   
   // Quantidade de bancos traseiros = passageiros acima de 18 (máximo 5)
   const bancosNecessarios = Math.max(0, totalPresentes - LIMITE_PARA_BANCOS_TRASEIROS);
@@ -373,8 +373,8 @@ function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, 
 }
 
 // Função legada mantida para compatibilidade
-function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
-  return calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, [], 0);
+async function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
+  return await calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, [], 0);
 }
 
 /**
@@ -383,14 +383,14 @@ function calcularBancosTraseiros(sentados, ponteiro, totalPresentes) {
  * Avança pela quantidade de pessoas que ficaram em pé.
  * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe, tipoRodizio = 1) {
+async function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe, tipoRodizio = 1) {
   if (quantidadeEmPe === 0 || participantesRodizio.length === 0) {
     // Ninguém em pé, ponteiro não muda
     return;
   }
-  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroAtual = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_assentos WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
   const novoPonteiro = (ponteiroAtual + quantidadeEmPe) % participantesRodizio.length;
-  db.prepare('UPDATE rotacao_assentos SET ponteiro = ? WHERE id = ?').run(novoPonteiro, tipoRodizio);
+  await db.execute({ sql: 'UPDATE rotacao_assentos SET ponteiro = ? WHERE id = ?', args: [novoPonteiro, tipoRodizio] });
 }
 
 /**
@@ -399,12 +399,12 @@ function avancarPonteiroAssentos(participantesRodizio, quantidadeEmPe, tipoRodiz
  * @param {number} quantidade - Quantidade de bancos traseiros utilizados (ida + volta)
  * @param {number} tipoRodizio - 1 para IDA, 2 para VOLTA
  */
-function avancarPonteiroBancos(sentados, quantidade, tipoRodizio = 1) {
+async function avancarPonteiroBancos(sentados, quantidade, tipoRodizio = 1) {
   const total = sentados.length;
   if (total === 0 || quantidade === 0) return;
-  const ponteiroAtual = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?').get(tipoRodizio).ponteiro;
+  const ponteiroAtual = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
   const novoPonteiro = (ponteiroAtual + quantidade) % total;
-  db.prepare('UPDATE rotacao_bancos_traseiros SET ponteiro = ? WHERE id = ?').run(novoPonteiro, tipoRodizio);
+  await db.execute({ sql: 'UPDATE rotacao_bancos_traseiros SET ponteiro = ? WHERE id = ?', args: [novoPonteiro, tipoRodizio] });
 }
 
 /**
@@ -412,7 +412,7 @@ function avancarPonteiroBancos(sentados, quantidade, tipoRodizio = 1) {
  * Também avança os ponteiros para o próximo dia (ida e volta separadamente).
  * Remove relatórios com mais de 30 dias.
  */
-function gerarRelatorioDoDia(data) {
+async function gerarRelatorioDoDia(data) {
   const respostas = db.prepare(`
     SELECT p.id, p.nome, p.ordem, r.resposta
     FROM respostas_dia r
@@ -428,13 +428,13 @@ function gerarRelatorioDoDia(data) {
   const totalSoVolto = respostas.filter(r => r.resposta === 'so_volto').length;
 
   // Busca informação de cadeira_fixa para respostas
-  const respostasComCadeira = respostas.map(r => {
-    const passageiro = db.prepare('SELECT cadeira_fixa FROM passageiros WHERE id = ?').get(r.id);
+  const respostasComCadeira = await Promise.all(respostas.map(async r => {
+    const passageiro = (await db.execute({ sql: 'SELECT cadeira_fixa FROM passageiros WHERE id = ?', args: [r.id] })).rows[0];
     return { ...r, cadeira_fixa: passageiro?.cadeira_fixa || 0 };
-  });
+  }));
 
   // Calcula ida e volta separadamente
-  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeira);
+  const { ida, volta } = await calcularAssentosIdaVolta(respostasComCadeira);
 
   // Calcula participantes do rodízio (sem cadeira fixa) para IDA
   const presentesIda = respostasComCadeira.filter(r => 
@@ -445,12 +445,12 @@ function gerarRelatorioDoDia(data) {
   // Avança ponteiro único pela quantidade total de pessoas em pé (ida + volta)
   // Isso mantém a ordem A-Z contínua entre os dias
   const totalEmPe = ida.emPe.length + volta.emPe.length;
-  avancarPonteiroAssentos(participantesRodizioIda, totalEmPe, 1);
+  await avancarPonteiroAssentos(participantesRodizioIda, totalEmPe, 1);
   
   // Avança ponteiro dos bancos traseiros pelo total (ida + volta)
   // Isso mantém a ordem Z-A contínua entre os dias
   const totalBancosTraseiros = ida.bancosTraseiros.length + volta.bancosTraseiros.length;
-  avancarPonteiroBancos(ida.sentados.filter(s => s.cadeira_fixa !== 1), totalBancosTraseiros, 1);
+  await avancarPonteiroBancos(ida.sentados.filter(s => s.cadeira_fixa !== 1), totalBancosTraseiros, 1);
 
   const dadosJson = JSON.stringify({
     passageiros: respostas.map(r => ({ id: r.id, nome: r.nome, ordem: r.ordem, resposta: r.resposta })),
@@ -503,17 +503,17 @@ function gerarRelatorioDoDia(data) {
 /**
  * Limpa as respostas da enquete do dia especificado.
  */
-function limparRespostasDia(data) {
-  db.prepare('DELETE FROM respostas_dia WHERE data = ?').run(data);
+async function limparRespostasDia(data) {
+  await db.execute({ sql: 'DELETE FROM respostas_dia WHERE data = ?', args: [data] });
 }
 
 // ─────────────────────────────────────────────
 // Agendamento: gerar relatório às 15:30
 // ─────────────────────────────────────────────
-cron.schedule('30 15 * * *', () => {
+cron.schedule('30 15 * * *', async () => {
   const dataHoje = getDataHoje();
   console.log(`[CRON] Gerando relatório do dia ${dataHoje}...`);
-  const resultado = gerarRelatorioDoDia(dataHoje);
+  const resultado = await gerarRelatorioDoDia(dataHoje);
   if (resultado) {
     console.log(`[CRON] Relatório gerado: ${resultado.totalPassageiros} passageiros`);
   } else {
@@ -524,14 +524,14 @@ cron.schedule('30 15 * * *', () => {
 // ─────────────────────────────────────────────
 // Agendamento: limpar respostas antigas às 00:00
 // ─────────────────────────────────────────────
-cron.schedule('0 0 * * *', () => {
+cron.schedule('0 0 * * *', async () => {
   // Calcula a data de ontem
   const ontem = new Date();
   ontem.setDate(ontem.getDate() - 1);
   const dataOntem = `${ontem.getFullYear()}-${String(ontem.getMonth() + 1).padStart(2, '0')}-${String(ontem.getDate()).padStart(2, '0')}`;
   
   console.log(`[CRON] Limpando respostas do dia ${dataOntem}...`);
-  limparRespostasDia(dataOntem);
+  await limparRespostasDia(dataOntem);
   console.log(`[CRON] Limpeza concluída`);
 });
 
@@ -544,7 +544,7 @@ cron.schedule('0 0 * * *', () => {
  * Verifica a senha de administração
  * Body: { senha }
  */
-app.post('/api/admin/login', limiteEscrita, (req, res) => {
+app.post('/api/admin/login', limiteEscrita, async (req, res) => {
   const { senha } = req.body;
   
   if (senha === ADMIN_PASSWORD) {
@@ -558,9 +558,9 @@ app.post('/api/admin/login', limiteEscrita, (req, res) => {
  * GET /api/admin/configuracoes
  * Retorna as configurações do sistema
  */
-app.get('/api/admin/configuracoes', (req, res) => {
-  const limiteSentados = getLimiteSentados();
-  const bancosTraseiros = getBancosTraseiros();
+app.get('/api/admin/configuracoes', async (req, res) => {
+  const limiteSentados = await getLimiteSentados();
+  const bancosTraseiros = await getBancosTraseiros();
   res.json({ limite_sentados: limiteSentados, bancos_traseiros: bancosTraseiros });
 });
 
@@ -569,28 +569,28 @@ app.get('/api/admin/configuracoes', (req, res) => {
  * Atualiza configurações do sistema
  * Body: { limite_sentados, bancos_traseiros }
  */
-app.put('/api/admin/configuracoes', limiteEscrita, (req, res) => {
+app.put('/api/admin/configuracoes', limiteEscrita, async (req, res) => {
   const { limite_sentados, bancos_traseiros } = req.body;
   
   if (limite_sentados !== undefined) {
     const valorLimite = parseInt(limite_sentados);
     if (!isNaN(valorLimite) && valorLimite >= 1) {
-      db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('limite_sentados', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(valorLimite.toString());
+      await db.execute({ sql: "INSERT INTO configuracoes (chave, valor) VALUES ('limite_sentados', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor", args: [valorLimite.toString()] });
     }
   }
 
   if (bancos_traseiros !== undefined) {
     const valorBancos = parseInt(bancos_traseiros);
     if (!isNaN(valorBancos) && valorBancos >= 0) {
-      db.prepare("INSERT INTO configuracoes (chave, valor) VALUES ('bancos_traseiros', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor").run(valorBancos.toString());
+      await db.execute({ sql: "INSERT INTO configuracoes (chave, valor) VALUES ('bancos_traseiros', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor", args: [valorBancos.toString()] });
     }
   }
   
   res.json({ 
     sucesso: true, 
     configuracoes: { 
-      limite_sentados: getLimiteSentados(),
-      bancos_traseiros: getBancosTraseiros()
+      limite_sentados: await getLimiteSentados(),
+      bancos_traseiros: await getBancosTraseiros()
     } 
   });
 });
@@ -599,9 +599,9 @@ app.put('/api/admin/configuracoes', limiteEscrita, (req, res) => {
  * GET /api/admin/ponteiros
  * Retorna o estado dos ponteiros e o último passageiro de cada rodízio.
  */
-app.get('/api/admin/ponteiros', (req, res) => {
-  const ponteiroAssentosRaw = db.prepare('SELECT ponteiro FROM rotacao_assentos WHERE id = 1').get()?.ponteiro || 0;
-  const ponteiroBancosRaw = db.prepare('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1').get()?.ponteiro || 0;
+app.get('/api/admin/ponteiros', async (req, res) => {
+  const ponteiroAssentosRaw = (await db.execute('SELECT ponteiro FROM rotacao_assentos WHERE id = 1')).rows[0]?.ponteiro || 0;
+  const ponteiroBancosRaw = (await db.execute('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1')).rows[0]?.ponteiro || 0;
 
   const participantesRodizio = db.prepare(`
     SELECT id, nome
@@ -648,7 +648,7 @@ app.get('/api/admin/ponteiros', (req, res) => {
  * Params: tipo ('assentos' ou 'bancosTraseiros')
  * Body: { passageiro_id }
  */
-app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
+app.put('/api/admin/ponteiros/:tipo', limiteEscrita, async (req, res) => {
   const { tipo } = req.params;
   const { passageiro_id } = req.body;
 
@@ -657,7 +657,7 @@ app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
   }
 
   // Verifica se o passageiro existe e não tem cadeira fixa
-  const passageiro = db.prepare('SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?').get(passageiro_id);
+  const passageiro = (await db.execute({ sql: 'SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?', args: [passageiro_id] })).rows[0];
   if (!passageiro) {
     return res.status(404).json({ erro: 'Passageiro não encontrado' });
   }
@@ -666,7 +666,7 @@ app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
   }
 
   // Busca lista de participantes do rodízio
-  const participantesRodizio = db.prepare('SELECT id, nome FROM passageiros WHERE cadeira_fixa != 1').all();
+  const participantesRodizio = (await db.execute('SELECT id, nome FROM passageiros WHERE cadeira_fixa != 1')).rows;
   if (participantesRodizio.length === 0) {
     return res.status(400).json({ erro: 'Nenhum participante no rodízio' });
   }
@@ -692,8 +692,8 @@ app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
   const novoPonteiro = (index + 1) % participantesRodizio.length;
 
   // Atualiza no banco (atualiza tanto ida quanto volta)
-  db.prepare(`UPDATE ${tabela} SET ponteiro = ? WHERE id = 1`).run(novoPonteiro);
-  db.prepare(`UPDATE ${tabela} SET ponteiro = ? WHERE id = 2`).run(novoPonteiro);
+  await db.execute({ sql: `UPDATE ${tabela} SET ponteiro = ? WHERE id = 1`, args: [novoPonteiro] });
+  await db.execute({ sql: `UPDATE ${tabela} SET ponteiro = ? WHERE id = 2`, args: [novoPonteiro] });
 
   res.json({ sucesso: true, novoPonteiro, ultimoPassageiro: passageiro.nome });
 });
@@ -702,8 +702,8 @@ app.put('/api/admin/ponteiros/:tipo', limiteEscrita, (req, res) => {
  * GET /api/passageiros
  * Retorna lista de todos os passageiros em ordem alfabética
  */
-app.get('/api/passageiros', (req, res) => {
-  const passageiros = db.prepare('SELECT id, nome, ordem, cadeira_fixa FROM passageiros ORDER BY ordem').all();
+app.get('/api/passageiros', async (req, res) => {
+  const passageiros = (await db.execute('SELECT id, nome, ordem, cadeira_fixa FROM passageiros ORDER BY ordem')).rows;
   res.json(passageiros);
 });
 
@@ -712,7 +712,7 @@ app.get('/api/passageiros', (req, res) => {
  * Adiciona um novo passageiro
  * Body: { nome }
  */
-app.post('/api/passageiros', limiteEscrita, (req, res) => {
+app.post('/api/passageiros', limiteEscrita, async (req, res) => {
   const { nome } = req.body;
 
   if (!nome || nome.trim() === '') {
@@ -722,16 +722,16 @@ app.post('/api/passageiros', limiteEscrita, (req, res) => {
   const nomeNormalizado = nome.trim();
 
   // Verifica se já existe
-  const existente = db.prepare('SELECT id FROM passageiros WHERE nome = ?').get(nomeNormalizado);
+  const existente = (await db.execute({ sql: 'SELECT id FROM passageiros WHERE nome = ?', args: [nomeNormalizado] })).rows[0];
   if (existente) {
     return res.status(409).json({ erro: 'Passageiro já existe na lista' });
   }
 
   // Pega a última ordem e adiciona +1
-  const ultimaOrdem = db.prepare('SELECT MAX(ordem) as max FROM passageiros').get();
+  const ultimaOrdem = (await db.execute('SELECT MAX(ordem) as max FROM passageiros')).rows[0];
   const novaOrdem = (ultimaOrdem.max || 0) + 1;
 
-  const result = db.prepare('INSERT INTO passageiros (nome, ordem) VALUES (?, ?)').run(nomeNormalizado, novaOrdem);
+  const result = await db.execute({ sql: 'INSERT INTO passageiros (nome, ordem) VALUES (?, ?)', args: [nomeNormalizado, novaOrdem] });
   
   res.json({ sucesso: true, id: result.lastInsertRowid, nome: nomeNormalizado, ordem: novaOrdem });
 });
@@ -741,12 +741,12 @@ app.post('/api/passageiros', limiteEscrita, (req, res) => {
  * Edita um passageiro (nome e/ou cadeira_fixa)
  * Body: { nome?, cadeira_fixa? }
  */
-app.put('/api/passageiros/:id', limiteEscrita, (req, res) => {
+app.put('/api/passageiros/:id', limiteEscrita, async (req, res) => {
   const { id } = req.params;
   const { nome, cadeira_fixa } = req.body;
 
   // Verifica se o passageiro existe
-  const passageiro = db.prepare('SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?').get(id);
+  const passageiro = (await db.execute({ sql: 'SELECT id, nome, cadeira_fixa FROM passageiros WHERE id = ?', args: [id] })).rows[0];
   if (!passageiro) {
     return res.status(404).json({ erro: 'Passageiro não encontrado' });
   }
@@ -755,21 +755,21 @@ app.put('/api/passageiros/:id', limiteEscrita, (req, res) => {
   if (nome !== undefined && nome.trim() !== '') {
     const nomeNormalizado = nome.trim();
     // Verifica se outro passageiro já tem esse nome
-    const existente = db.prepare('SELECT id FROM passageiros WHERE nome = ? AND id != ?').get(nomeNormalizado, id);
+    const existente = (await db.execute({ sql: 'SELECT id FROM passageiros WHERE nome = ? AND id != ?', args: [nomeNormalizado, id] })).rows[0];
     if (existente) {
       return res.status(409).json({ erro: 'Já existe outro passageiro com esse nome' });
     }
-    db.prepare('UPDATE passageiros SET nome = ? WHERE id = ?').run(nomeNormalizado, id);
+    await db.execute({ sql: 'UPDATE passageiros SET nome = ? WHERE id = ?', args: [nomeNormalizado, id] });
   }
 
   // Atualiza cadeira_fixa se fornecido
   if (cadeira_fixa !== undefined) {
     const valor = cadeira_fixa ? 1 : 0;
-    db.prepare('UPDATE passageiros SET cadeira_fixa = ? WHERE id = ?').run(valor, id);
+    await db.execute({ sql: 'UPDATE passageiros SET cadeira_fixa = ? WHERE id = ?', args: [valor, id] });
   }
 
   // Retorna passageiro atualizado
-  const atualizado = db.prepare('SELECT id, nome, ordem, cadeira_fixa FROM passageiros WHERE id = ?').get(id);
+  const atualizado = (await db.execute({ sql: 'SELECT id, nome, ordem, cadeira_fixa FROM passageiros WHERE id = ?', args: [id] })).rows[0];
   res.json({ sucesso: true, passageiro: atualizado });
 });
 
@@ -777,26 +777,26 @@ app.put('/api/passageiros/:id', limiteEscrita, (req, res) => {
  * DELETE /api/passageiros/:id
  * Remove um passageiro da lista
  */
-app.delete('/api/passageiros/:id', limiteEscrita, (req, res) => {
+app.delete('/api/passageiros/:id', limiteEscrita, async (req, res) => {
   const { id } = req.params;
 
   // Verifica se o passageiro existe
-  const passageiro = db.prepare('SELECT id, nome FROM passageiros WHERE id = ?').get(id);
+  const passageiro = (await db.execute({ sql: 'SELECT id, nome FROM passageiros WHERE id = ?', args: [id] })).rows[0];
   if (!passageiro) {
     return res.status(404).json({ erro: 'Passageiro não encontrado' });
   }
 
   // Remove respostas do dia associadas
-  db.prepare('DELETE FROM respostas_dia WHERE passageiro_id = ?').run(id);
+  await db.execute({ sql: 'DELETE FROM respostas_dia WHERE passageiro_id = ?', args: [id] });
   
   // Remove o passageiro
-  db.prepare('DELETE FROM passageiros WHERE id = ?').run(id);
+  await db.execute({ sql: 'DELETE FROM passageiros WHERE id = ?', args: [id] });
 
   // Reordena os passageiros restantes
-  const passageiros = db.prepare('SELECT id FROM passageiros ORDER BY ordem').all();
-  passageiros.forEach((p, index) => {
-    db.prepare('UPDATE passageiros SET ordem = ? WHERE id = ?').run(index + 1, p.id);
-  });
+  const passageiros = (await db.execute('SELECT id FROM passageiros ORDER BY ordem')).rows;
+  for (let i = 0; i < passageiros.length; i++) {
+    await db.execute({ sql: 'UPDATE passageiros SET ordem = ? WHERE id = ?', args: [i + 1, passageiros[i].id] });
+  }
 
   res.json({ sucesso: true, removido: passageiro.nome });
 });
@@ -805,7 +805,7 @@ app.delete('/api/passageiros/:id', limiteEscrita, (req, res) => {
  * GET /api/respostas
  * Retorna as respostas de hoje com dados calculados separados para IDA e VOLTA
  */
-app.get('/api/respostas', (req, res) => {
+app.get('/api/respostas', async (req, res) => {
   const data = getDataHoje();
 
   const respostas = db.prepare(`
@@ -817,7 +817,7 @@ app.get('/api/respostas', (req, res) => {
   `).all(data);
 
   // Busca informação de cadeira_fixa para cada passageiro
-  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const passageirosInfo = (await db.execute('SELECT id, cadeira_fixa FROM passageiros')).rows;
   const mapaCadeiraFixa = {};
   passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
 
@@ -832,7 +832,7 @@ app.get('/api/respostas', (req, res) => {
   respostas.forEach(r => { mapaRespostas[r.id] = r.resposta; });
 
   // Calcula ida e volta separadamente
-  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
+  const { ida, volta } = await calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   res.json({
     data,
@@ -869,7 +869,7 @@ app.get('/api/respostas', (req, res) => {
  * Salva ou atualiza a resposta de um passageiro
  * Body: { passageiro_id, resposta }
  */
-app.post('/api/respostas', limiteEscrita, (req, res) => {
+app.post('/api/respostas', limiteEscrita, async (req, res) => {
   // Verifica se ainda está no horário permitido para votar
   if (!podeVotar()) {
     return res.status(403).json({ erro: 'Votação encerrada. Não é possível votar após 15:30.' });
@@ -887,7 +887,7 @@ app.post('/api/respostas', limiteEscrita, (req, res) => {
   }
 
   // Verifica se o passageiro existe
-  const passageiro = db.prepare('SELECT id FROM passageiros WHERE id = ?').get(passageiro_id);
+  const passageiro = (await db.execute({ sql: 'SELECT id FROM passageiros WHERE id = ?', args: [passageiro_id] })).rows[0];
   if (!passageiro) {
     return res.status(404).json({ erro: 'Passageiro não encontrado' });
   }
@@ -907,7 +907,7 @@ app.post('/api/respostas', limiteEscrita, (req, res) => {
  * DELETE /api/respostas/:passageiro_id
  * Remove a resposta de um passageiro para hoje (desmarca)
  */
-app.delete('/api/respostas/:passageiro_id', limiteEscrita, (req, res) => {
+app.delete('/api/respostas/:passageiro_id', limiteEscrita, async (req, res) => {
   // Verifica se ainda está no horário permitido para votar
   if (!podeVotar()) {
     return res.status(403).json({ erro: 'Votação encerrada. Não é possível alterar após 15:30.' });
@@ -915,7 +915,7 @@ app.delete('/api/respostas/:passageiro_id', limiteEscrita, (req, res) => {
 
   const { passageiro_id } = req.params;
   const data = getDataHoje();
-  db.prepare('DELETE FROM respostas_dia WHERE passageiro_id = ? AND data = ?').run(passageiro_id, data);
+  await db.execute({ sql: 'DELETE FROM respostas_dia WHERE passageiro_id = ? AND data = ?', args: [passageiro_id, data] });
   res.json({ sucesso: true });
 });
 
@@ -923,7 +923,7 @@ app.delete('/api/respostas/:passageiro_id', limiteEscrita, (req, res) => {
  * GET /api/relatorios
  * Lista todos os relatórios salvos (últimos 30 dias)
  */
-app.get('/api/relatorios', (req, res) => {
+app.get('/api/relatorios', async (req, res) => {
   const relatorios = db.prepare(`
     SELECT id, data, total_passageiros, total_vou_e_volto, total_so_vou, total_so_volto, total_sentados, total_em_pe, criado_em
     FROM relatorios
@@ -936,9 +936,9 @@ app.get('/api/relatorios', (req, res) => {
  * GET /api/relatorios/:data
  * Retorna o relatório de uma data específica (YYYY-MM-DD)
  */
-app.get('/api/relatorios/:data', (req, res) => {
+app.get('/api/relatorios/:data', async (req, res) => {
   const { data } = req.params;
-  const relatorio = db.prepare('SELECT * FROM relatorios WHERE data = ?').get(data);
+  const relatorio = (await db.execute({ sql: 'SELECT * FROM relatorios WHERE data = ?', args: [data] })).rows[0];
   if (!relatorio) {
     return res.status(404).json({ erro: 'Relatório não encontrado' });
   }
@@ -951,9 +951,9 @@ app.get('/api/relatorios/:data', (req, res) => {
  * POST /api/relatorios/gerar
  * Gera manualmente o relatório do dia atual (uso administrativo)
  */
-app.post('/api/relatorios/gerar', limiteEscrita, (req, res) => {
+app.post('/api/relatorios/gerar', limiteEscrita, async (req, res) => {
   const data = getDataHoje();
-  const resultado = gerarRelatorioDoDia(data);
+  const resultado = await gerarRelatorioDoDia(data);
   if (!resultado) {
     return res.status(400).json({ erro: 'Nenhuma resposta encontrada para hoje' });
   }
@@ -964,7 +964,7 @@ app.post('/api/relatorios/gerar', limiteEscrita, (req, res) => {
  * GET /api/relatorio/csv
  * Exporta o relatório de HOJE como CSV (atalho) - com IDA e VOLTA separados
  */
-app.get('/api/relatorio/csv', (req, res) => {
+app.get('/api/relatorio/csv', async (req, res) => {
   const data = getDataHoje();
   
   // Busca respostas do dia
@@ -981,7 +981,7 @@ app.get('/api/relatorio/csv', (req, res) => {
   }
 
   // Busca informação de cadeira_fixa
-  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const passageirosInfo = (await db.execute('SELECT id, cadeira_fixa FROM passageiros')).rows;
   const mapaCadeiraFixa = {};
   passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
 
@@ -992,7 +992,7 @@ app.get('/api/relatorio/csv', (req, res) => {
   }));
 
   // Calcula assentos separados para ida e volta
-  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
+  const { ida, volta } = await calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   // Separa por tipo de resposta
   const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
@@ -1056,7 +1056,7 @@ app.get('/api/relatorio/csv', (req, res) => {
  * GET /api/relatorio/pdf
  * Exporta o relatório de HOJE como PDF (atalho) - com IDA e VOLTA separados
  */
-app.get('/api/relatorio/pdf', (req, res) => {
+app.get('/api/relatorio/pdf', async (req, res) => {
   const data = getDataHoje();
 
   // Busca respostas do dia
@@ -1073,7 +1073,7 @@ app.get('/api/relatorio/pdf', (req, res) => {
   }
 
   // Busca informação de cadeira_fixa
-  const passageirosInfo = db.prepare('SELECT id, cadeira_fixa FROM passageiros').all();
+  const passageirosInfo = (await db.execute('SELECT id, cadeira_fixa FROM passageiros')).rows;
   const mapaCadeiraFixa = {};
   passageirosInfo.forEach(p => { mapaCadeiraFixa[p.id] = p.cadeira_fixa; });
 
@@ -1084,7 +1084,7 @@ app.get('/api/relatorio/pdf', (req, res) => {
   }));
 
   // Calcula assentos separados para ida e volta
-  const { ida, volta } = calcularAssentosIdaVolta(respostasComCadeiraFixa);
+  const { ida, volta } = await calcularAssentosIdaVolta(respostasComCadeiraFixa);
 
   // Separa por tipo
   const vouEVolto = respostas.filter(r => r.resposta === 'vou_e_volto').map(r => r.nome);
@@ -1229,9 +1229,9 @@ app.get('/api/relatorio/pdf', (req, res) => {
  * GET /api/relatorios/:data/csv
  * Exporta o relatório de uma data como CSV (formato 3 colunas) - com IDA e VOLTA separados
  */
-app.get('/api/relatorios/:data/csv', (req, res) => {
+app.get('/api/relatorios/:data/csv', async (req, res) => {
   const { data } = req.params;
-  const relatorio = db.prepare('SELECT * FROM relatorios WHERE data = ?').get(data);
+  const relatorio = (await db.execute({ sql: 'SELECT * FROM relatorios WHERE data = ?', args: [data] })).rows[0];
   if (!relatorio) {
     return res.status(404).json({ erro: 'Relatório não encontrado' });
   }
@@ -1321,9 +1321,9 @@ app.get('/api/relatorios/:data/csv', (req, res) => {
  * GET /api/relatorios/:data/pdf
  * Exporta o relatório de uma data como PDF (formato com 3 colunas) - com IDA e VOLTA separados
  */
-app.get('/api/relatorios/:data/pdf', (req, res) => {
+app.get('/api/relatorios/:data/pdf', async (req, res) => {
   const { data } = req.params;
-  const relatorio = db.prepare('SELECT * FROM relatorios WHERE data = ?').get(data);
+  const relatorio = (await db.execute({ sql: 'SELECT * FROM relatorios WHERE data = ?', args: [data] })).rows[0];
   if (!relatorio) {
     return res.status(404).json({ erro: 'Relatório não encontrado' });
   }
@@ -1483,7 +1483,7 @@ app.get('/api/relatorios/:data/pdf', (req, res) => {
 });
 
 // Rota para a página administrativa (com rate limit geral)
-app.get('/admin', limiteGeral, (req, res) => {
+app.get('/admin', limiteGeral, async (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
