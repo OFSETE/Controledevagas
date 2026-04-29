@@ -10,7 +10,7 @@ const path = require('path');
 const cron = require('node-cron');
 const PDFDocument = require('pdfkit');
 const rateLimit = require('express-rate-limit');
-const db = require('./database');
+const { db, initDatabase } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1487,10 +1487,19 @@ app.get('/admin', limiteGeral, async (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Inicia o servidor
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
-  console.log(`📊 Painel admin em http://localhost:${PORT}/admin`);
+// Inicializa o banco de dados e cria as tabelas se não existirem
+initDatabase().then(() => {
+  console.log('✅ Banco de dados inicializado com sucesso.');
+}).catch(err => {
+  console.error('❌ Erro ao inicializar banco de dados:', err);
 });
+
+// Inicia o servidor (útil para desenvolvimento local)
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
+    console.log(`📊 Painel admin em http://localhost:${PORT}/admin`);
+  });
+}
 
 module.exports = app;
