@@ -10,7 +10,7 @@ const path = require('path');
 const cron = require('node-cron');
 const PDFDocument = require('pdfkit');
 const rateLimit = require('express-rate-limit');
-const { db, initDatabase } = require('./database');
+const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -129,7 +129,7 @@ async function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
     // Todos sentados
     const sentados = [...cadeirasFixas, ...participantesRodizio];
     let bancosTraseiros = [];
-    
+
     // Bancos traseiros só se > 18 pessoas (excluindo cadeiras fixas do rodízio)
     if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
       const ponteiroBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
@@ -145,7 +145,7 @@ async function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
   // Ordena participantes A-Z para rodízio de em pé
   const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
   const total = participantesAZ.length;
-  
+
   // Calcula quantos ficam em pé
   const quantidadeEmPe = total - lugaresDisponiveis;
 
@@ -183,19 +183,19 @@ async function calcularAssentosDoDia(presentes, tipoRodizio = 1) {
  */
 async function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
   // Filtra quem vai na IDA: vou_e_volto ou so_vou
-  const presentesIda = respostasComCadeiraFixa.filter(r => 
+  const presentesIda = respostasComCadeiraFixa.filter(r =>
     r.resposta === 'vou_e_volto' || r.resposta === 'so_vou'
   );
-  
+
   // Filtra quem vai na VOLTA: vou_e_volto ou so_volto
-  const presentesVolta = respostasComCadeiraFixa.filter(r => 
+  const presentesVolta = respostasComCadeiraFixa.filter(r =>
     r.resposta === 'vou_e_volto' || r.resposta === 'so_volto'
   );
 
   // ========== CÁLCULO DA IDA ==========
   const resultadoIda = await calcularAssentosTrechoComPonteiro(
-    presentesIda, 
-    1, 
+    presentesIda,
+    1,
     [], // Sem exclusões de em pé
     0,  // Sem offset de em pé
     [], // Sem exclusões de bancos traseiros
@@ -207,7 +207,7 @@ async function calcularAssentosIdaVolta(respostasComCadeiraFixa) {
   // Quem foi para banco traseiro na IDA deve ser pulado na VOLTA
   // Continua do ponteiro onde a ida parou
   const resultadoVolta = await calcularAssentosTrechoComPonteiro(
-    presentesVolta, 
+    presentesVolta,
     1, // Usa o MESMO ponteiro (ida)
     resultadoIda.emPe, // Pula quem já ficou em pé na ida
     resultadoIda.emPe.length, // Offset em pé: continua de onde a ida parou
@@ -254,14 +254,14 @@ async function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluir
   if (participantesRodizio.length <= lugaresDisponiveis) {
     const sentados = [...cadeirasFixas, ...participantesRodizio];
     let bancosTraseiros = [];
-    
+
     if (totalPresentes > LIMITE_PARA_BANCOS_TRASEIROS && participantesRodizio.length > 0) {
       const ponteiroBancos = (await db.execute({ sql: 'SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = ?', args: [tipoRodizio] })).rows[0].ponteiro;
       bancosTraseiros = await calcularBancosTraseirosComExclusao(
-        participantesRodizio, 
-        ponteiroBancos, 
-        totalPresentes, 
-        excluirDoRodizioBancos, 
+        participantesRodizio,
+        ponteiroBancos,
+        totalPresentes,
+        excluirDoRodizioBancos,
         offsetPonteiroBancos
       );
     }
@@ -289,15 +289,15 @@ async function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluir
   const emPe = [];
   let posicao = ponteiroInicialEmPe;
   let tentativas = 0;
-  
+
   while (emPe.length < quantidadeEmPe && tentativas < totalParticipantes) {
     const candidato = todosSortedAZ[posicao % totalParticipantes];
-    
+
     // Se não está na lista de exclusão, adiciona aos em pé
     if (!excluirIdsEmPe.has(candidato.id)) {
       emPe.push(candidato);
     }
-    
+
     posicao++;
     tentativas++;
   }
@@ -311,10 +311,10 @@ async function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluir
 
   // Bancos traseiros só para quem participa do rodízio (sentados, não em pé)
   const bancosTraseiros = await calcularBancosTraseirosComExclusao(
-    sentadosRodizio, 
-    ponteiroBaseBancos, 
-    totalPresentes, 
-    excluirDoRodizioBancos, 
+    sentadosRodizio,
+    ponteiroBaseBancos,
+    totalPresentes,
+    excluirDoRodizioBancos,
     offsetPonteiroBancos
   );
 
@@ -334,41 +334,41 @@ async function calcularAssentosTrechoComPonteiro(presentes, tipoRodizio, excluir
  */
 async function calcularBancosTraseirosComExclusao(sentados, ponteiro, totalPresentes, excluir = [], offset = 0) {
   if (sentados.length === 0) return [];
-  
+
   const bancosTraseiros = await getBancosTraseiros();
-  
+
   // Quantidade de bancos traseiros = passageiros acima de 18 (máximo 5)
   const bancosNecessarios = Math.max(0, totalPresentes - LIMITE_PARA_BANCOS_TRASEIROS);
   const quantidade = Math.min(bancosTraseiros, bancosNecessarios, sentados.length);
-  
+
   if (quantidade === 0) return [];
-  
+
   // Ordena Z-A (decrescente por nome) para rodízio
   const sentadosOrdenados = [...sentados].sort((a, b) => b.nome.localeCompare(a.nome));
   const total = sentadosOrdenados.length;
-  
+
   // IDs dos que devem ser pulados (já foram para banco traseiro na ida)
   const excluirIds = new Set(excluir.map(p => p.id));
-  
+
   // Ponteiro inicial considerando o offset
   const ponteiroInicial = (ponteiro + offset) % total;
-  
+
   const resultado = [];
   let posicao = ponteiroInicial;
   let tentativas = 0;
-  
+
   while (resultado.length < quantidade && tentativas < total) {
     const candidato = sentadosOrdenados[posicao % total];
-    
+
     // Se não está na lista de exclusão, adiciona
     if (!excluirIds.has(candidato.id)) {
       resultado.push(candidato);
     }
-    
+
     posicao++;
     tentativas++;
   }
-  
+
   return resultado;
 }
 
@@ -413,13 +413,13 @@ async function avancarPonteiroBancos(sentados, quantidade, tipoRodizio = 1) {
  * Remove relatórios com mais de 30 dias.
  */
 async function gerarRelatorioDoDia(data) {
-  const respostas = db.prepare(`
+  const respostas = (await db.execute({ sql: `
     SELECT p.id, p.nome, p.ordem, r.resposta
     FROM respostas_dia r
     JOIN passageiros p ON p.id = r.passageiro_id
     WHERE r.data = ?
     ORDER BY p.ordem
-  `).all(data);
+  `, args: [data] })).rows;
 
   if (respostas.length === 0) return null;
 
@@ -437,7 +437,7 @@ async function gerarRelatorioDoDia(data) {
   const { ida, volta } = await calcularAssentosIdaVolta(respostasComCadeira);
 
   // Calcula participantes do rodízio (sem cadeira fixa) para IDA
-  const presentesIda = respostasComCadeira.filter(r => 
+  const presentesIda = respostasComCadeira.filter(r =>
     r.resposta === 'vou_e_volto' || r.resposta === 'so_vou'
   );
   const participantesRodizioIda = presentesIda.filter(r => r.cadeira_fixa !== 1);
@@ -446,7 +446,7 @@ async function gerarRelatorioDoDia(data) {
   // Isso mantém a ordem A-Z contínua entre os dias
   const totalEmPe = ida.emPe.length + volta.emPe.length;
   await avancarPonteiroAssentos(participantesRodizioIda, totalEmPe, 1);
-  
+
   // Avança ponteiro dos bancos traseiros pelo total (ida + volta)
   // Isso mantém a ordem Z-A contínua entre os dias
   const totalBancosTraseiros = ida.bancosTraseiros.length + volta.bancosTraseiros.length;
@@ -469,11 +469,11 @@ async function gerarRelatorioDoDia(data) {
   });
 
   // Insere ou substitui o relatório
-  db.prepare(`
+  await db.execute({ sql: `
     INSERT OR REPLACE INTO relatorios
       (data, total_passageiros, total_vou_e_volto, total_so_vou, total_so_volto, total_sentados, total_em_pe, dados_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+  `, args: [
     data,
     respostas.length,
     totalVouEVolto,
@@ -482,21 +482,21 @@ async function gerarRelatorioDoDia(data) {
     ida.sentados.length + volta.sentados.length,
     ida.emPe.length + volta.emPe.length,
     dadosJson
-  );
+  ]});
 
   // Remove relatórios com mais de 30 dias
-  db.prepare(`
+  await db.execute(`
     DELETE FROM relatorios
     WHERE data < date('now', '-30 days')
-  `).run();
+  `);
 
-  return { 
-    totalPassageiros: respostas.length, 
-    totalVouEVolto, 
-    totalSoVou, 
-    totalSoVolto, 
-    ida, 
-    volta 
+  return {
+    totalPassageiros: respostas.length,
+    totalVouEVolto,
+    totalSoVou,
+    totalSoVolto,
+    ida,
+    volta
   };
 }
 
@@ -529,7 +529,7 @@ cron.schedule('0 0 * * *', async () => {
   const ontem = new Date();
   ontem.setDate(ontem.getDate() - 1);
   const dataOntem = `${ontem.getFullYear()}-${String(ontem.getMonth() + 1).padStart(2, '0')}-${String(ontem.getDate()).padStart(2, '0')}`;
-  
+
   console.log(`[CRON] Limpando respostas do dia ${dataOntem}...`);
   await limparRespostasDia(dataOntem);
   console.log(`[CRON] Limpeza concluída`);
@@ -546,7 +546,7 @@ cron.schedule('0 0 * * *', async () => {
  */
 app.post('/api/admin/login', limiteEscrita, async (req, res) => {
   const { senha } = req.body;
-  
+
   if (senha === ADMIN_PASSWORD) {
     res.json({ sucesso: true });
   } else {
@@ -571,7 +571,7 @@ app.get('/api/admin/configuracoes', async (req, res) => {
  */
 app.put('/api/admin/configuracoes', limiteEscrita, async (req, res) => {
   const { limite_sentados, bancos_traseiros } = req.body;
-  
+
   if (limite_sentados !== undefined) {
     const valorLimite = parseInt(limite_sentados);
     if (!isNaN(valorLimite) && valorLimite >= 1) {
@@ -585,13 +585,13 @@ app.put('/api/admin/configuracoes', limiteEscrita, async (req, res) => {
       await db.execute({ sql: "INSERT INTO configuracoes (chave, valor) VALUES ('bancos_traseiros', ?) ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor", args: [valorBancos.toString()] });
     }
   }
-  
-  res.json({ 
-    sucesso: true, 
-    configuracoes: { 
+
+  res.json({
+    sucesso: true,
+    configuracoes: {
       limite_sentados: await getLimiteSentados(),
       bancos_traseiros: await getBancosTraseiros()
-    } 
+    }
   });
 });
 
@@ -603,11 +603,11 @@ app.get('/api/admin/ponteiros', async (req, res) => {
   const ponteiroAssentosRaw = (await db.execute('SELECT ponteiro FROM rotacao_assentos WHERE id = 1')).rows[0]?.ponteiro || 0;
   const ponteiroBancosRaw = (await db.execute('SELECT ponteiro FROM rotacao_bancos_traseiros WHERE id = 1')).rows[0]?.ponteiro || 0;
 
-  const participantesRodizio = db.prepare(`
+  const participantesRodizio = (await db.execute(`
     SELECT id, nome
     FROM passageiros
     WHERE cadeira_fixa != 1
-  `).all();
+  `)).rows;
 
   const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
   const participantesZA = [...participantesRodizio].sort((a, b) => b.nome.localeCompare(a.nome));
@@ -673,7 +673,7 @@ app.put('/api/admin/ponteiros/:tipo', limiteEscrita, async (req, res) => {
 
   let index = -1;
   let tabela = '';
-  
+
   if (tipo === 'assentos') {
     const participantesAZ = [...participantesRodizio].sort((a, b) => a.nome.localeCompare(b.nome));
     index = participantesAZ.findIndex(p => p.id === parseInt(passageiro_id));
@@ -732,7 +732,7 @@ app.post('/api/passageiros', limiteEscrita, async (req, res) => {
   const novaOrdem = (ultimaOrdem.max || 0) + 1;
 
   const result = await db.execute({ sql: 'INSERT INTO passageiros (nome, ordem) VALUES (?, ?)', args: [nomeNormalizado, novaOrdem] });
-  
+
   res.json({ sucesso: true, id: result.lastInsertRowid, nome: nomeNormalizado, ordem: novaOrdem });
 });
 
@@ -788,7 +788,7 @@ app.delete('/api/passageiros/:id', limiteEscrita, async (req, res) => {
 
   // Remove respostas do dia associadas
   await db.execute({ sql: 'DELETE FROM respostas_dia WHERE passageiro_id = ?', args: [id] });
-  
+
   // Remove o passageiro
   await db.execute({ sql: 'DELETE FROM passageiros WHERE id = ?', args: [id] });
 
@@ -808,13 +808,13 @@ app.delete('/api/passageiros/:id', limiteEscrita, async (req, res) => {
 app.get('/api/respostas', async (req, res) => {
   const data = getDataHoje();
 
-  const respostas = db.prepare(`
+  const respostas = (await db.execute({ sql: `
     SELECT p.id, p.nome, p.ordem, r.resposta
     FROM respostas_dia r
     JOIN passageiros p ON p.id = r.passageiro_id
     WHERE r.data = ?
     ORDER BY p.ordem
-  `).all(data);
+  `, args: [data] })).rows;
 
   // Busca informação de cadeira_fixa para cada passageiro
   const passageirosInfo = (await db.execute('SELECT id, cadeira_fixa FROM passageiros')).rows;
@@ -894,11 +894,11 @@ app.post('/api/respostas', limiteEscrita, async (req, res) => {
 
   const data = getDataHoje();
 
-  db.prepare(`
+  await db.execute({ sql: `
     INSERT INTO respostas_dia (passageiro_id, data, resposta)
     VALUES (?, ?, ?)
     ON CONFLICT(passageiro_id, data) DO UPDATE SET resposta = excluded.resposta
-  `).run(passageiro_id, data, resposta);
+  `, args: [passageiro_id, data, resposta] });
 
   res.json({ sucesso: true, passageiro_id, resposta, data });
 });
@@ -924,11 +924,11 @@ app.delete('/api/respostas/:passageiro_id', limiteEscrita, async (req, res) => {
  * Lista todos os relatórios salvos (últimos 30 dias)
  */
 app.get('/api/relatorios', async (req, res) => {
-  const relatorios = db.prepare(`
+  const relatorios = (await db.execute(`
     SELECT id, data, total_passageiros, total_vou_e_volto, total_so_vou, total_so_volto, total_sentados, total_em_pe, criado_em
     FROM relatorios
     ORDER BY data DESC
-  `).all();
+  `)).rows;
   res.json(relatorios);
 });
 
@@ -966,15 +966,15 @@ app.post('/api/relatorios/gerar', limiteEscrita, async (req, res) => {
  */
 app.get('/api/relatorio/csv', async (req, res) => {
   const data = getDataHoje();
-  
+
   // Busca respostas do dia
-  const respostas = db.prepare(`
+  const respostas = (await db.execute({ sql: `
     SELECT p.id, p.nome, p.ordem, r.resposta
     FROM respostas_dia r
     JOIN passageiros p ON p.id = r.passageiro_id
     WHERE r.data = ?
     ORDER BY p.ordem
-  `).all(data);
+  `, args: [data] })).rows;
 
   if (respostas.length === 0) {
     return res.status(404).send('Nenhuma resposta registrada hoje.');
@@ -1015,7 +1015,7 @@ app.get('/api/relatorio/csv', async (req, res) => {
 
   // Seção: IDA
   csv += `\n========== IDA (${ida.totalPresentes} pessoas) ==========\n`;
-  
+
   if (ida.emPe.length > 0) {
     csv += `\nEm Pé na IDA (${ida.emPe.length} pessoa${ida.emPe.length > 1 ? 's' : ''})\n`;
     ida.emPe.forEach((p, i) => {
@@ -1032,7 +1032,7 @@ app.get('/api/relatorio/csv', async (req, res) => {
 
   // Seção: VOLTA
   csv += `\n========== VOLTA (${volta.totalPresentes} pessoas) ==========\n`;
-  
+
   if (volta.emPe.length > 0) {
     csv += `\nEm Pé na VOLTA (${volta.emPe.length} pessoa${volta.emPe.length > 1 ? 's' : ''})\n`;
     volta.emPe.forEach((p, i) => {
@@ -1060,13 +1060,13 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   const data = getDataHoje();
 
   // Busca respostas do dia
-  const respostas = db.prepare(`
+  const respostas = (await db.execute({ sql: `
     SELECT p.id, p.nome, p.ordem, r.resposta
     FROM respostas_dia r
     JOIN passageiros p ON p.id = r.passageiro_id
     WHERE r.data = ?
     ORDER BY p.ordem
-  `).all(data);
+  `, args: [data] })).rows;
 
   if (respostas.length === 0) {
     return res.status(404).send('Nenhuma resposta registrada hoje.');
@@ -1117,9 +1117,9 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   doc.fontSize(10).font('Helvetica-Bold');
   doc.rect(startX, y, colWidth * 3, rowHeight).fillAndStroke('#e5e7eb', '#000');
   doc.fillColor('#000')
-     .text('Vai e Volta', startX + 5, y + 4, { width: colWidth - 10 })
-     .text('Só Vai', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
-     .text('Só Volta', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
+    .text('Vai e Volta', startX + 5, y + 4, { width: colWidth - 10 })
+    .text('Só Vai', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
+    .text('Só Volta', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
   y += rowHeight;
 
   // Linhas
@@ -1128,9 +1128,9 @@ app.get('/api/relatorio/pdf', async (req, res) => {
     const bg = i % 2 === 0 ? '#ffffff' : '#f9fafb';
     doc.rect(startX, y, colWidth * 3, rowHeight).fillAndStroke(bg, '#e5e7eb');
     doc.fillColor('#000')
-       .text(vouEVolto[i] || '', startX + 5, y + 4, { width: colWidth - 10 })
-       .text(soVou[i] || '', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
-       .text(soVolto[i] || '', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
+      .text(vouEVolto[i] || '', startX + 5, y + 4, { width: colWidth - 10 })
+      .text(soVou[i] || '', startX + colWidth + 5, y + 4, { width: colWidth - 10 })
+      .text(soVolto[i] || '', startX + colWidth * 2 + 5, y + 4, { width: colWidth - 10 });
     y += rowHeight;
 
     if (y > 750) {
@@ -1142,19 +1142,19 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   // ========== SEÇÃO IDA ==========
   y += 25;
   if (y > 700) { doc.addPage(); y = 40; }
-  
+
   doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a56db')
-     .text(`IDA (${ida.totalPresentes} pessoas)`, startX, y);
+    .text(`IDA (${ida.totalPresentes} pessoas)`, startX, y);
   y += 25;
 
   // Em Pé - IDA
   if (ida.emPe.length > 0) {
     if (y > 700) { doc.addPage(); y = 40; }
-    
+
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#c81e1e')
-       .text(`Em Pé na IDA (${ida.emPe.length} pessoa${ida.emPe.length > 1 ? 's' : ''})`, startX, y);
+      .text(`Em Pé na IDA (${ida.emPe.length} pessoa${ida.emPe.length > 1 ? 's' : ''})`, startX, y);
     y += 18;
-    
+
     doc.fontSize(9).font('Helvetica').fillColor('#000');
     ida.emPe.forEach((p, i) => {
       if (y > 750) { doc.addPage(); y = 40; }
@@ -1167,11 +1167,11 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   // Bancos Traseiros - IDA
   if (ida.bancosTraseiros.length > 0) {
     if (y > 700) { doc.addPage(); y = 40; }
-    
+
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
-       .text(`Bancos Traseiros na IDA (${ida.bancosTraseiros.length})`, startX, y);
+      .text(`Bancos Traseiros na IDA (${ida.bancosTraseiros.length})`, startX, y);
     y += 18;
-    
+
     doc.fontSize(9).font('Helvetica').fillColor('#000');
     ida.bancosTraseiros.forEach((p, i) => {
       if (y > 750) { doc.addPage(); y = 40; }
@@ -1184,19 +1184,19 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   // ========== SEÇÃO VOLTA ==========
   y += 15;
   if (y > 700) { doc.addPage(); y = 40; }
-  
+
   doc.fontSize(14).font('Helvetica-Bold').fillColor('#057a55')
-     .text(`VOLTA (${volta.totalPresentes} pessoas)`, startX, y);
+    .text(`VOLTA (${volta.totalPresentes} pessoas)`, startX, y);
   y += 25;
 
   // Em Pé - VOLTA
   if (volta.emPe.length > 0) {
     if (y > 700) { doc.addPage(); y = 40; }
-    
+
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#c81e1e')
-       .text(`Em Pé na VOLTA (${volta.emPe.length} pessoa${volta.emPe.length > 1 ? 's' : ''})`, startX, y);
+      .text(`Em Pé na VOLTA (${volta.emPe.length} pessoa${volta.emPe.length > 1 ? 's' : ''})`, startX, y);
     y += 18;
-    
+
     doc.fontSize(9).font('Helvetica').fillColor('#000');
     volta.emPe.forEach((p, i) => {
       if (y > 750) { doc.addPage(); y = 40; }
@@ -1209,11 +1209,11 @@ app.get('/api/relatorio/pdf', async (req, res) => {
   // Bancos Traseiros - VOLTA
   if (volta.bancosTraseiros.length > 0) {
     if (y > 700) { doc.addPage(); y = 40; }
-    
+
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
-       .text(`Bancos Traseiros na VOLTA (${volta.bancosTraseiros.length})`, startX, y);
+      .text(`Bancos Traseiros na VOLTA (${volta.bancosTraseiros.length})`, startX, y);
     y += 18;
-    
+
     doc.fontSize(9).font('Helvetica').fillColor('#000');
     volta.bancosTraseiros.forEach((p, i) => {
       if (y > 750) { doc.addPage(); y = 40; }
@@ -1270,7 +1270,7 @@ app.get('/api/relatorios/:data/csv', async (req, res) => {
   if (dados.ida && dados.volta) {
     // Formato novo: IDA e VOLTA separados
     linhas.push(`"========== IDA (${dados.ida.totalPresentes || dados.ida.sentados.length} pessoas) =========="`);
-    
+
     if (dados.ida.emPe && dados.ida.emPe.length > 0) {
       linhas.push(`"Em Pé na IDA (${dados.ida.emPe.length}):"`);
       dados.ida.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
@@ -1284,7 +1284,7 @@ app.get('/api/relatorios/:data/csv', async (req, res) => {
     }
 
     linhas.push(`"========== VOLTA (${dados.volta.totalPresentes || dados.volta.sentados.length} pessoas) =========="`);
-    
+
     if (dados.volta.emPe && dados.volta.emPe.length > 0) {
       linhas.push(`"Em Pé na VOLTA (${dados.volta.emPe.length}):"`);
       dados.volta.emPe.forEach((p, i) => linhas.push(`"${i + 1}. ${p.nome}"`));
@@ -1363,10 +1363,10 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
 
   // Cabeçalhos das colunas (fundo azul escuro)
   const yInicio = doc.y;
-  
+
   // Fundo do cabeçalho
   doc.rect(margemEsquerda, yInicio, larguraPagina, alturaCabecalho).fill('#1a365d');
-  
+
   // Texto do cabeçalho
   doc.fillColor('#ffffff').fontSize(10).font('Helvetica-Bold');
   doc.text('Vai e volta:', margemEsquerda + 5, yInicio + 7, { width: larguraColuna - 10, align: 'center' });
@@ -1376,9 +1376,9 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
   // Linhas da tabela
   doc.fillColor('#000000').fontSize(9).font('Helvetica');
   const maxLinhas = Math.max(vouEVolto.length, soVou.length, soVolto.length);
-  
+
   let yAtual = yInicio + alturaCabecalho;
-  
+
   for (let i = 0; i < maxLinhas; i++) {
     // Alterna cor de fundo
     if (i % 2 === 0) {
@@ -1386,32 +1386,32 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
     } else {
       doc.rect(margemEsquerda, yAtual, larguraPagina, alturaLinha).fill('#ffffff');
     }
-    
+
     doc.fillColor('#000000');
-    
+
     // Bordas verticais
     doc.strokeColor('#e2e8f0').lineWidth(0.5);
     doc.moveTo(margemEsquerda + larguraColuna, yAtual).lineTo(margemEsquerda + larguraColuna, yAtual + alturaLinha).stroke();
     doc.moveTo(margemEsquerda + larguraColuna * 2, yAtual).lineTo(margemEsquerda + larguraColuna * 2, yAtual + alturaLinha).stroke();
-    
+
     // Textos
     if (vouEVolto[i]) doc.text(vouEVolto[i], margemEsquerda + 5, yAtual + 4, { width: larguraColuna - 10 });
     if (soVou[i]) doc.text(soVou[i], margemEsquerda + larguraColuna + 5, yAtual + 4, { width: larguraColuna - 10 });
     if (soVolto[i]) doc.text(soVolto[i], margemEsquerda + larguraColuna * 2 + 5, yAtual + 4, { width: larguraColuna - 10 });
-    
+
     yAtual += alturaLinha;
-    
+
     // Nova página se necessário
     if (yAtual > 750) {
       doc.addPage();
       yAtual = 40;
     }
   }
-  
+
   // Borda externa da tabela
   doc.strokeColor('#1a365d').lineWidth(1);
   doc.rect(margemEsquerda, yInicio, larguraPagina, alturaCabecalho + (maxLinhas * alturaLinha)).stroke();
-  
+
   doc.y = yAtual + 20;
 
   // Verifica se é formato novo (com ida/volta) ou antigo
@@ -1419,14 +1419,14 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
     // ========== SEÇÃO IDA ==========
     doc.moveDown();
     if (doc.y > 700) { doc.addPage(); }
-    
+
     doc.fontSize(14).font('Helvetica-Bold').fillColor('#1a56db')
-       .text(`IDA (${dados.ida.totalPresentes || dados.ida.sentados.length} pessoas)`);
+      .text(`IDA (${dados.ida.totalPresentes || dados.ida.sentados.length} pessoas)`);
     doc.moveDown(0.5);
 
     if (dados.ida.emPe && dados.ida.emPe.length > 0) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#c53030')
-         .text(`Em Pé na IDA (${dados.ida.emPe.length})`);
+        .text(`Em Pé na IDA (${dados.ida.emPe.length})`);
       doc.fontSize(10).font('Helvetica').fillColor('#000000');
       dados.ida.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
       doc.moveDown(0.5);
@@ -1434,7 +1434,7 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
 
     if (dados.ida.bancosTraseiros && dados.ida.bancosTraseiros.length > 0) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
-         .text(`Bancos Traseiros na IDA (${dados.ida.bancosTraseiros.length})`);
+        .text(`Bancos Traseiros na IDA (${dados.ida.bancosTraseiros.length})`);
       doc.fontSize(10).font('Helvetica').fillColor('#000000');
       dados.ida.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
       doc.moveDown(0.5);
@@ -1443,14 +1443,14 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
     // ========== SEÇÃO VOLTA ==========
     doc.moveDown();
     if (doc.y > 700) { doc.addPage(); }
-    
+
     doc.fontSize(14).font('Helvetica-Bold').fillColor('#057a55')
-       .text(`VOLTA (${dados.volta.totalPresentes || dados.volta.sentados.length} pessoas)`);
+      .text(`VOLTA (${dados.volta.totalPresentes || dados.volta.sentados.length} pessoas)`);
     doc.moveDown(0.5);
 
     if (dados.volta.emPe && dados.volta.emPe.length > 0) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#c53030')
-         .text(`Em Pé na VOLTA (${dados.volta.emPe.length})`);
+        .text(`Em Pé na VOLTA (${dados.volta.emPe.length})`);
       doc.fontSize(10).font('Helvetica').fillColor('#000000');
       dados.volta.emPe.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
       doc.moveDown(0.5);
@@ -1458,7 +1458,7 @@ app.get('/api/relatorios/:data/pdf', async (req, res) => {
 
     if (dados.volta.bancosTraseiros && dados.volta.bancosTraseiros.length > 0) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#c27803')
-         .text(`Bancos Traseiros na VOLTA (${dados.volta.bancosTraseiros.length})`);
+        .text(`Bancos Traseiros na VOLTA (${dados.volta.bancosTraseiros.length})`);
       doc.fontSize(10).font('Helvetica').fillColor('#000000');
       dados.volta.bancosTraseiros.forEach((p, i) => doc.text(`${i + 1}. ${p.nome}`));
     }
@@ -1487,19 +1487,10 @@ app.get('/admin', limiteGeral, async (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-// Inicializa o banco de dados e cria as tabelas se não existirem
-initDatabase().then(() => {
-  console.log('✅ Banco de dados inicializado com sucesso.');
-}).catch(err => {
-  console.error('❌ Erro ao inicializar banco de dados:', err);
+// Inicia o servidor
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
+  console.log(`📊 Painel admin em http://localhost:${PORT}/admin`);
 });
-
-// Inicia o servidor (útil para desenvolvimento local)
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Servidor rodando em http://localhost:${PORT}`);
-    console.log(`📊 Painel admin em http://localhost:${PORT}/admin`);
-  });
-}
 
 module.exports = app;
