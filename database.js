@@ -23,7 +23,7 @@ async function initDatabase() {
   `);
 
   await db.execute(`
-    CREATE TABLE IF NOT EXISTS respostas (
+    CREATE TABLE IF NOT EXISTS respostas_dia (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       passageiro_id INTEGER NOT NULL,
       data TEXT NOT NULL,
@@ -81,7 +81,7 @@ async function initDatabase() {
 
   // Popula a lista se estiver vazia
   const { rows } = await db.execute("SELECT COUNT(*) as count FROM passageiros");
-  if (rows[0].count === 0) {
+  if (Number(rows[0].count) === 0) {
     const nomesIniciais = [
       'Alana', 'Alcicleia', 'Ana', 'Antônia', 'Aquila', 'Aurilene', 'Breno', 'Carmelita',
       'Charles', 'Cheilane', 'Danilo', 'Denise', 'Dilza', 'Dona Lurdes', 'Elias', 'Eliane',
